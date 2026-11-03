@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { searchPhotoCandidates, type PhotoListing } from '../api'
 
-type Props = { categoryId: string }
 type Signature = number[]
 
 function money(n: number) {
@@ -58,7 +57,7 @@ function ListingGrid({ items, empty }: { items: PhotoListing[]; empty: string })
   ))}</div>
 }
 
-export function PhotoSearch({ categoryId }: Props) {
+export function PhotoSearch() {
   const [file, setFile] = useState<File | null>(null)
   const [hint, setHint] = useState('')
   const [preview, setPreview] = useState<string | null>(null)
@@ -81,7 +80,7 @@ export function PhotoSearch({ categoryId }: Props) {
     setLoading(true); setError(null)
     try {
       const source = await signatureFromBlob(file)
-      const result = await searchPhotoCandidates(categoryId, query)
+      const result = await searchPhotoCandidates(query)
       const [rankedActive, rankedSold] = await Promise.all([
         rankVisually(result.active, source), rankVisually(result.sold, source),
       ])
@@ -103,7 +102,7 @@ export function PhotoSearch({ categoryId }: Props) {
       </label>
       <div className="photo-fields">
         <label><span className="field-label">Бренд или модель — необязательно</span><input value={hint} onChange={e => setHint(e.target.value)} placeholder="Например: Maison Margiela GAT" /></label>
-        <p className="field-help">Для точного поиска укажите то, что знаете. Без подсказки поиск идёт по всей выбранной категории.</p>
+        <p className="field-help">Для точного поиска укажите то, что знаете. Поиск по фото работает по всем категориям и не зависит от фильтра трендов ниже.</p>
         <button className="primary" type="button" onClick={() => void search()} disabled={loading || !file}>{loading ? 'Сравниваем изображения…' : 'Найти похожие лоты'}</button>
         {error && <p className="banner">{error}</p>}
       </div>

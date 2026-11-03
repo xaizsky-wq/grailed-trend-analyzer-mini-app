@@ -79,7 +79,7 @@ export default function App() {
         </p>
       </header>
 
-      <PhotoSearch categoryId={categoryId} />
+      <PhotoSearch />
 
       <section className="controls">
         {bootError && <p className="banner">{bootError}</p>}

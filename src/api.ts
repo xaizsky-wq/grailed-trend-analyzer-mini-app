@@ -70,8 +70,9 @@ async function query(category: string, page: number, start: number, end: number,
   return response.json() as Promise<{ hits: any[]; nbPages: number; nbHits: number }>
 }
 
-async function listingQuery(category: string, status: 'active' | 'sold', textQuery: string, page: number) {
-  const filters = [PATHS[category].map(p => `category_path:${p}`), 'department:menswear']
+async function listingQuery(status: 'active' | 'sold', textQuery: string, page: number) {
+  const allCategoryPaths = [...new Set(Object.values(PATHS).flat())]
+  const filters = [allCategoryPaths.map(p => `category_path:${p}`), 'department:menswear']
   const search = new URLSearchParams({
     query: textQuery,
     hitsPerPage: '80',
@@ -106,11 +107,11 @@ function toPhotoListing(hit: any, status: 'active' | 'sold'): PhotoListing {
   }
 }
 
-export async function searchPhotoCandidates(category: string, textQuery: string): Promise<PhotoSearchResponse> {
+export async function searchPhotoCandidates(textQuery: string): Promise<PhotoSearchResponse> {
   const normalized = textQuery.trim()
   const [activeData, soldData] = await Promise.all([
-    listingQuery(category, 'active', normalized, 0),
-    listingQuery(category, 'sold', normalized, 0),
+    listingQuery('active', normalized, 0),
+    listingQuery('sold', normalized, 0),
   ])
   return {
     activeTotal: activeData.nbHits || 0,

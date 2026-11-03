@@ -3,6 +3,7 @@ import { CategoryPicker } from './components/CategoryPicker'
 import { PeriodPicker } from './components/PeriodPicker'
 import { PriceRange } from './components/PriceRange'
 import { TopList } from './components/TopList'
+import { PhotoSearch } from './components/PhotoSearch'
 import {
   fetchCategories,
   fetchTrends,
@@ -77,6 +78,8 @@ export default function App() {
           топ не попадают.
         </p>
       </header>
+
+      <PhotoSearch categoryId={categoryId} />
 
       <section className="controls">
         {bootError && <p className="banner">{bootError}</p>}

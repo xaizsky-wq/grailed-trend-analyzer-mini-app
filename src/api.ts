@@ -5,6 +5,8 @@ export type TrendItem = { rank: number; model_key: string; title: string; brand:
 export type SoldListing = { id: string; title: string; color: string | null; price: number; seller: string | null; sold_at: string | null; grailed_url: string; image_url?: string | null }
 export type ModelItemsResponse = { category_id: string; model_key: string; total_sold: number; returned: number; items: SoldListing[] }
 export type TrendsResponse = { category_id: string; period: { type: string; value: string }; generated_at: string; stale?: boolean; message?: string; analysis?: { sold_sample: number; models_found: number; ranked_by: string; from_cache?: boolean }; items: TrendItem[] }
+export type PhotoListing = { id: string; title: string; brand: string; price: number; status: 'active' | 'sold'; grailed_url: string; image_url: string | null; color: string | null; sold_at: string | null }
+export type PhotoSearchResponse = { activeTotal: number; soldTotal: number; active: PhotoListing[]; sold: PhotoListing[]; query: string }
 
 const CATEGORIES: Category[] = [
   { id: 'sneakers', name: 'Кроссовки' }, { id: 'down_jackets', name: 'Пуховики' },
@@ -66,6 +68,57 @@ async function query(category: string, page: number, start: number, end: number,
   const response = await fetch(`https://${APP_ID}-dsn.algolia.net/1/indexes/Listing_sold_production/query`, { method: 'POST', headers: { 'X-Algolia-Application-Id': APP_ID, 'X-Algolia-API-Key': SEARCH_KEY, 'Content-Type': 'application/json' }, body: JSON.stringify({ params: search.toString() }) })
   if (!response.ok) throw new Error('Источник данных временно недоступен')
   return response.json() as Promise<{ hits: any[]; nbPages: number; nbHits: number }>
+}
+
+async function listingQuery(category: string, status: 'active' | 'sold', textQuery: string, page: number) {
+  const filters = [PATHS[category].map(p => `category_path:${p}`), 'department:menswear']
+  const search = new URLSearchParams({
+    query: textQuery,
+    hitsPerPage: '80',
+    page: String(page),
+    facetFilters: JSON.stringify(filters),
+  })
+  const index = status === 'sold' ? 'Listing_sold_production' : 'Listing_production'
+  const response = await fetch(`https://${APP_ID}-dsn.algolia.net/1/indexes/${index}/query`, {
+    method: 'POST',
+    headers: { 'X-Algolia-Application-Id': APP_ID, 'X-Algolia-API-Key': SEARCH_KEY, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ params: search.toString() }),
+  })
+  if (!response.ok) throw new Error('Поиск Grailed временно недоступен')
+  return response.json() as Promise<{ hits: any[]; nbHits: number }>
+}
+
+function toPhotoListing(hit: any, status: 'active' | 'sold'): PhotoListing {
+  const id = String(hit.id || hit.objectID || '')
+  const brand = Array.isArray(hit.designer_names) ? hit.designer_names.join(' × ') : String(hit.designer_names || '')
+  const image = hit.cover_photo?.url || hit.cover_photo?.image_url || null
+  const soldUnix = Number(hit.sold_at_i || hit.sold_at || 0)
+  return {
+    id,
+    title: String(hit.title || 'Без названия'),
+    brand,
+    price: Number(status === 'sold' ? (hit.sold_price || hit.price || 0) : (hit.price || 0)),
+    status,
+    grailed_url: `https://www.grailed.com/listings/${id}`,
+    image_url: image ? `${image}${String(image).includes('?') ? '' : '?w=360'}` : null,
+    color: hit.color || hit.color_name || hit.colorway || null,
+    sold_at: soldUnix ? new Date(soldUnix * 1000).toISOString() : null,
+  }
+}
+
+export async function searchPhotoCandidates(category: string, textQuery: string): Promise<PhotoSearchResponse> {
+  const normalized = textQuery.trim()
+  const [activeData, soldData] = await Promise.all([
+    listingQuery(category, 'active', normalized, 0),
+    listingQuery(category, 'sold', normalized, 0),
+  ])
+  return {
+    activeTotal: activeData.nbHits || 0,
+    soldTotal: soldData.nbHits || 0,
+    active: (activeData.hits || []).map(hit => toPhotoListing(hit, 'active')),
+    sold: (soldData.hits || []).map(hit => toPhotoListing(hit, 'sold')),
+    query: normalized,
+  }
 }
 
 export async function fetchTrends(params: { category_id: string; period_type: PeriodType; season?: Season; date?: string; min_price?: number; max_price?: number; refresh?: boolean }): Promise<TrendsResponse> {

@@ -1,145 +1,88 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { searchPhotoCandidates, type PhotoListing } from '../api'
 
-type Signature = number[]
+type Match = { query: string; score: number }
+type ClassifierResult = { label: string; score: number }
 
-function money(n: number) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n)
-}
+const PRODUCTS = [
+  'Nike Air Force 1 sneakers', 'Nike Dunk Low sneakers', 'Nike Dunk High sneakers', 'Nike Air Max 95 sneakers', 'Nike Air Max 97 sneakers',
+  'Nike Air Jordan 1 sneakers', 'Nike Air Jordan 3 sneakers', 'Nike Air Jordan 4 sneakers', 'Nike Air Jordan 5 sneakers', 'Nike Air Jordan 11 sneakers',
+  'Adidas Samba sneakers', 'Adidas Gazelle sneakers', 'Adidas Campus sneakers', 'Adidas Superstar sneakers', 'Adidas Yeezy Boost 350 sneakers',
+  'Yeezy Slide sandals', 'Yeezy Foam Runner shoes', 'New Balance 550 sneakers', 'New Balance 990 sneakers', 'New Balance 2002R sneakers',
+  'Maison Margiela Replica GAT sneakers', 'Rick Owens Ramones sneakers', 'Rick Owens Geobasket sneakers', 'Rick Owens Tractor boots',
+  'Balenciaga Triple S sneakers', 'Balenciaga Track sneakers', 'Balenciaga Speed Trainer sneakers', 'Balenciaga Arena sneakers',
+  'Common Projects Achilles sneakers', 'Salomon XT-6 sneakers', 'ASICS Gel-Kayano 14 sneakers', 'Converse Chuck Taylor sneakers',
+  'Vans Old Skool sneakers', 'Prada Monolith boots', 'Bottega Veneta Puddle boots', 'Timberland 6 Inch boots',
+  'The North Face Nuptse puffer jacket', 'Canada Goose Expedition parka', 'Canada Goose Langford parka', 'Moncler Maya puffer jacket',
+  'Arc\'teryx Beta jacket', 'Patagonia down jacket', 'Stone Island down jacket', 'Prada puffer jacket', 'Rick Owens puffer jacket',
+  'Supreme Box Logo T-shirt', 'Supreme graphic T-shirt', 'Chrome Hearts T-shirt', 'Vintage band T-shirt', 'Vintage rap T-shirt',
+  'Stussy T-shirt', 'Bape T-shirt', 'Off-White T-shirt', 'Balenciaga T-shirt', 'Maison Margiela T-shirt', 'Rick Owens T-shirt',
+  'Louis Vuitton Speedy bag', 'Louis Vuitton Neverfull bag', 'Louis Vuitton Keepall bag', 'Goyard Saint Louis tote bag',
+  'Dior Saddle bag', 'Balenciaga City bag', 'Prada Re-Nylon bag', 'Gucci Jackie bag', 'Bottega Veneta Cassette bag',
+  'Chrome Hearts crossbody bag', 'Supreme shoulder bag', 'Arc\'teryx backpack', 'Telfar shopping bag',
+]
 
-async function signatureFromBlob(blob: Blob): Promise<Signature> {
-  const canvas = document.createElement('canvas')
-  canvas.width = 8; canvas.height = 8
-  const ctx = canvas.getContext('2d', { willReadFrequently: true })
-  if (!ctx) throw new Error('Браузер не поддерживает анализ изображения')
-  if ('createImageBitmap' in window) {
-    const image = await createImageBitmap(blob)
-    ctx.drawImage(image, 0, 0, 8, 8)
-    image.close()
-  } else {
-    const url = URL.createObjectURL(blob)
-    try {
-      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
-        const element = new Image()
-        element.onload = () => resolve(element)
-        element.onerror = () => reject(new Error('Не удалось прочитать изображение'))
-        element.src = url
-      })
-      ctx.drawImage(image, 0, 0, 8, 8)
-    } finally { URL.revokeObjectURL(url) }
-  }
-  const pixels = ctx.getImageData(0, 0, 8, 8).data
-  const values: number[] = []
-  for (let i = 0; i < pixels.length; i += 16) values.push(pixels[i] / 255, pixels[i + 1] / 255, pixels[i + 2] / 255)
-  return values
-}
-
-function similarity(a: Signature, b: Signature) {
-  let error = 0
-  for (let i = 0; i < Math.min(a.length, b.length); i++) error += (a[i] - b[i]) ** 2
-  return Math.max(0, 1 - Math.sqrt(error / Math.min(a.length, b.length)))
-}
-
-async function rankVisually(items: PhotoListing[], source: Signature) {
-  const scored = await Promise.all(items.slice(0, 40).map(async (item, index) => {
-    if (!item.image_url) return { item, score: 0, index }
-    try {
-      const response = await fetch(item.image_url, { mode: 'cors', signal: AbortSignal.timeout(4500) })
-      if (!response.ok) throw new Error()
-      return { item, score: similarity(source, await signatureFromBlob(await response.blob())), index }
-    } catch { return { item, score: 0, index } }
-  }))
-  return scored.sort((a, b) => (b.score - a.score) || (a.index - b.index)).map(x => x.item)
-}
+function money(n: number) { return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n) }
 
 function ListingGrid({ items, empty }: { items: PhotoListing[]; empty: string }) {
   if (!items.length) return <p className="photo-empty">{empty}</p>
-  return <div className="photo-grid">{items.map(item => (
-    <a className="photo-card" href={item.grailed_url} target="_blank" rel="noreferrer" key={`${item.status}-${item.id}`}>
-      {item.image_url ? <img src={item.image_url} alt="" /> : <div className="photo-placeholder" />}
-      <div className="photo-card-body">
-        <p className="brand">{item.brand || '—'}</p>
-        <h4>{item.title}</h4>
-        <p><strong>{money(item.price)}</strong>{item.color ? ` · ${item.color}` : ''}</p>
-      </div>
-    </a>
-  ))}</div>
+  return <div className="photo-grid">{items.slice(0, 40).map(item => <a className="photo-card" href={item.grailed_url} target="_blank" rel="noreferrer" key={`${item.status}-${item.id}`}>
+    {item.image_url ? <img src={item.image_url} alt="" /> : <div className="photo-placeholder" />}
+    <div className="photo-card-body"><p className="brand">{item.brand || '—'}</p><h4>{item.title}</h4><p><strong>{money(item.price)}</strong>{item.color ? ` · ${item.color}` : ''}</p></div>
+  </a>)}</div>
 }
 
 export function PhotoSearch() {
-  const [file, setFile] = useState<File | null>(null)
-  const [hint, setHint] = useState('')
-  const [preview, setPreview] = useState<string | null>(null)
-  const [active, setActive] = useState<PhotoListing[]>([])
-  const [sold, setSold] = useState<PhotoListing[]>([])
-  const [totals, setTotals] = useState({ active: 0, sold: 0 })
-  const [tab, setTab] = useState<'active' | 'sold'>('active')
-  const [loading, setLoading] = useState(false)
-  const [searched, setSearched] = useState(false)
-  const [status, setStatus] = useState('')
-  const [error, setError] = useState<string | null>(null)
+  const [file, setFile] = useState<File | null>(null), [hint, setHint] = useState(''), [preview, setPreview] = useState<string | null>(null)
+  const [matches, setMatches] = useState<Match[]>([]), [active, setActive] = useState<PhotoListing[]>([]), [sold, setSold] = useState<PhotoListing[]>([])
+  const [totals, setTotals] = useState({ active: 0, sold: 0 }), [tab, setTab] = useState<'active' | 'sold'>('active'), [loading, setLoading] = useState(false)
+  const [searched, setSearched] = useState(false), [status, setStatus] = useState(''), [error, setError] = useState<string | null>(null)
   const resultsRef = useRef<HTMLDivElement | null>(null)
-  const query = useMemo(() => hint.trim(), [hint])
 
-  useEffect(() => {
-    if (!file) { setPreview(null); return }
-    const url = URL.createObjectURL(file); setPreview(url)
-    return () => URL.revokeObjectURL(url)
-  }, [file])
+  useEffect(() => { if (!file) { setPreview(null); return }; const url = URL.createObjectURL(file); setPreview(url); return () => URL.revokeObjectURL(url) }, [file])
 
-  async function search(selectedFile = file, selectedQuery = query) {
+  async function search(selectedFile = file) {
     if (!selectedFile) { setError('Сначала выберите фотографию товара.'); return }
-    setLoading(true); setSearched(false); setError(null); setStatus('Анализируем фотографию…')
+    setLoading(true); setSearched(false); setError(null); setMatches([])
     try {
-      const source = await signatureFromBlob(selectedFile)
-      setStatus('Ищем актуальные и проданные лоты…')
-      let result = await searchPhotoCandidates(selectedQuery)
-      if (selectedQuery && result.activeTotal + result.soldTotal === 0) {
-        setStatus('По подсказке совпадений нет — ищем только по фото…')
-        result = await searchPhotoCandidates('')
-      }
-      setStatus('Сравниваем изображения…')
-      const [rankedActive, rankedSold] = await Promise.all([
-        rankVisually(result.active, source), rankVisually(result.sold, source),
-      ])
-      setActive(rankedActive); setSold(rankedSold)
-      setTotals({ active: result.activeTotal, sold: result.soldTotal })
-      setSearched(true); setStatus('')
+      const imageUrl = URL.createObjectURL(selectedFile)
+      setStatus('Загружаем бесплатную AI-модель в браузер…')
+      const { pipeline, env } = await import('@huggingface/transformers')
+      env.allowLocalModels = false
+      const classifier = await pipeline('zero-shot-image-classification', 'Xenova/clip-vit-base-patch32', {
+        progress_callback: (progress: { status?: string; progress?: number }) => {
+          if (progress.status === 'progress' && typeof progress.progress === 'number') setStatus(`Загружаем AI-модель… ${Math.round(progress.progress)}%`)
+        },
+      })
+      setStatus('AI определяет бренд и модель…')
+      const labels = PRODUCTS.map(product => `a product photo of ${product}`)
+      const output = await classifier(imageUrl, labels) as ClassifierResult[]
+      URL.revokeObjectURL(imageUrl)
+      const ranked = output.slice(0, 5).map(row => ({ query: row.label.replace(/^a product photo of /, ''), score: row.score }))
+      if (hint.trim()) ranked.unshift({ query: hint.trim(), score: 1 })
+      setMatches(ranked.slice(0, 5))
+      const query = ranked[0]?.query
+      if (!query) throw new Error('AI не смог определить товар')
+      setStatus(`Ищем ${query} на Grailed…`)
+      const result = await searchPhotoCandidates(query)
+      setActive(result.active); setSold(result.sold); setTotals({ active: result.activeTotal, sold: result.soldTotal }); setSearched(true)
       requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
-    } catch (err) { setError(err instanceof Error ? err.message : 'Не удалось выполнить поиск') }
-    finally { setLoading(false); setStatus('') }
+    } catch (err) { setError(err instanceof Error ? err.message : 'Не удалось запустить локальную AI-модель') } finally { setLoading(false); setStatus('') }
   }
 
-  function chooseFile(selectedFile: File | null) {
-    setFile(selectedFile); setActive([]); setSold([]); setTotals({ active: 0, sold: 0 }); setSearched(false)
-    if (selectedFile) void search(selectedFile, hint.trim())
-  }
+  function chooseFile(selectedFile: File | null) { setFile(selectedFile); setActive([]); setSold([]); setTotals({ active: 0, sold: 0 }); setSearched(false); setMatches([]); if (selectedFile) void search(selectedFile) }
 
+  const best = matches[0]
   return <section className="photo-search">
-    <div className="photo-heading">
-      <div><p className="eyebrow">visual match · beta</p><h2>Поиск по фото</h2></div>
-      <p>Загрузите фото. Визуальный алгоритм сравнит его с изображениями в каталоге, а название бренда или модели сузит выборку.</p>
-    </div>
-    <div className="photo-form">
-      <label className={`dropzone ${preview ? 'has-image' : ''}`}>
-        {preview ? <img src={preview} alt="Загруженный товар" /> : <><span className="drop-icon">＋</span><strong>Выбрать фото</strong><small>JPG, PNG или WEBP</small></>}
-        <input type="file" accept="image/jpeg,image/png,image/webp" onChange={e => chooseFile(e.target.files?.[0] || null)} />
-      </label>
-      <div className="photo-fields">
-        <label><span className="field-label">Бренд или модель — необязательно</span><input value={hint} onChange={e => setHint(e.target.value)} placeholder="Например: Maison Margiela GAT" /></label>
-        <p className="field-help">Для точного поиска укажите то, что знаете. Поиск по фото работает по всем категориям и не зависит от фильтра трендов ниже.</p>
-        <button className="primary" type="button" onClick={() => void search()} disabled={loading || !file}>{loading ? status || 'Ищем…' : searched ? 'Искать ещё раз' : 'Найти похожие лоты'}</button>
-        {loading && <p className="search-status" role="status"><span />{status}</p>}
-        {error && <p className="banner">{error}</p>}
-      </div>
-    </div>
-    {searched && <div className="photo-results" ref={resultsRef}>
-      <div className="result-tabs">
-        <button className={tab === 'active' ? 'chip active' : 'chip'} onClick={() => setTab('active')}>Актуальные · {totals.active.toLocaleString('ru-RU')}</button>
-        <button className={tab === 'sold' ? 'chip active' : 'chip'} onClick={() => setTab('sold')}>Проданные · {totals.sold.toLocaleString('ru-RU')}</button>
-      </div>
-      <p className="field-help">Показаны до 40 наиболее визуально похожих лотов из первых 80 совпадений. Счётчик показывает все найденные Grailed результаты.</p>
-      {tab === 'active' ? <ListingGrid items={active} empty="Актуальных лотов не найдено." /> : <ListingGrid items={sold} empty="Проданных лотов не найдено." />}
-    </div>}
+    <div className="photo-heading"><div><p className="eyebrow">CLIP vision · бесплатно</p><h2>AI-поиск по фото</h2></div><p>Открытая AI-модель работает прямо на вашем устройстве: определяет наиболее похожий бренд и модель, затем ищет лоты на Grailed.</p></div>
+    <div className="photo-form"><label className={`dropzone ${preview ? 'has-image' : ''}`}>{preview ? <img src={preview} alt="Загруженный товар" /> : <><span className="drop-icon">＋</span><strong>Выбрать фото</strong><small>JPG, PNG или WEBP</small></>}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e => chooseFile(e.target.files?.[0] || null)} /></label>
+      <div className="photo-fields"><label><span className="field-label">Бренд или модель — необязательно</span><input value={hint} onChange={e => setHint(e.target.value)} placeholder="Например: Maison Margiela GAT" /></label>
+        <p className="field-help">Первый запуск загружает AI-модель и может занять до минуты. Фото никуда не отправляется.</p>
+        <button className="primary" type="button" onClick={() => void search()} disabled={loading || !file}>{loading ? 'AI анализирует…' : searched ? 'Распознать ещё раз' : 'Распознать и найти'}</button>
+        {loading && <p className="search-status" role="status"><span />{status}</p>}{error && <p className="banner">{error}</p>}
+        {best && <div className="ai-result"><p className="field-label">AI определил</p><h3>{best.query}</h3><p>Уверенность {Math.round(best.score * 100)}%</p>{best.score < 0.18 && <p className="ai-warning">Низкая уверенность: добавьте бренд или модель в подсказку и повторите поиск.</p>}{matches.length > 1 && <p className="ai-alternatives">Другие варианты: {matches.slice(1, 4).map(x => x.query).join(', ')}</p>}</div>}
+      </div></div>
+    {searched && <div className="photo-results" ref={resultsRef}><div className="result-tabs"><button className={tab === 'active' ? 'chip active' : 'chip'} onClick={() => setTab('active')}>Актуальные · {totals.active.toLocaleString('ru-RU')}</button><button className={tab === 'sold' ? 'chip active' : 'chip'} onClick={() => setTab('sold')}>Проданные · {totals.sold.toLocaleString('ru-RU')}</button></div>
+      <p className="field-help">Запрос: <strong>{best?.query}</strong>. Показаны первые 40 Grailed результатов.</p>{tab === 'active' ? <ListingGrid items={active} empty="Актуальных лотов не найдено." /> : <ListingGrid items={sold} empty="Проданных лотов не найдено." />}</div>}
   </section>
 }

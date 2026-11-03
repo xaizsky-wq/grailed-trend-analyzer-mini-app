@@ -52,10 +52,6 @@ async function rankVisually(items: PhotoListing[], source: Signature) {
   return scored.sort((a, b) => (b.score - a.score) || (a.index - b.index)).map(x => x.item)
 }
 
-function cleanFilename(name: string) {
-  return name.replace(/\.[^.]+$/, '').replace(/(?:img|image|photo|screenshot|dsc)[-_ ]*\d*/gi, ' ').replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim()
-}
-
 function ListingGrid({ items, empty }: { items: PhotoListing[]; empty: string }) {
   if (!items.length) return <p className="photo-empty">{empty}</p>
   return <div className="photo-grid">{items.map(item => (
@@ -83,7 +79,7 @@ export function PhotoSearch() {
   const [status, setStatus] = useState('')
   const [error, setError] = useState<string | null>(null)
   const resultsRef = useRef<HTMLDivElement | null>(null)
-  const query = useMemo(() => hint.trim() || (file ? cleanFilename(file.name) : ''), [hint, file])
+  const query = useMemo(() => hint.trim(), [hint])
 
   useEffect(() => {
     if (!file) { setPreview(null); return }
@@ -97,7 +93,11 @@ export function PhotoSearch() {
     try {
       const source = await signatureFromBlob(selectedFile)
       setStatus('Ищем актуальные и проданные лоты…')
-      const result = await searchPhotoCandidates(selectedQuery)
+      let result = await searchPhotoCandidates(selectedQuery)
+      if (selectedQuery && result.activeTotal + result.soldTotal === 0) {
+        setStatus('По подсказке совпадений нет — ищем только по фото…')
+        result = await searchPhotoCandidates('')
+      }
       setStatus('Сравниваем изображения…')
       const [rankedActive, rankedSold] = await Promise.all([
         rankVisually(result.active, source), rankVisually(result.sold, source),
@@ -112,7 +112,7 @@ export function PhotoSearch() {
 
   function chooseFile(selectedFile: File | null) {
     setFile(selectedFile); setActive([]); setSold([]); setTotals({ active: 0, sold: 0 }); setSearched(false)
-    if (selectedFile) void search(selectedFile, hint.trim() || cleanFilename(selectedFile.name))
+    if (selectedFile) void search(selectedFile, hint.trim())
   }
 
   return <section className="photo-search">

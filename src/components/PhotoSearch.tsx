@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { searchPhotoCandidates, type PhotoListing } from '../api'
 
 type Signature = number[]
@@ -8,13 +8,26 @@ function money(n: number) {
 }
 
 async function signatureFromBlob(blob: Blob): Promise<Signature> {
-  const image = await createImageBitmap(blob)
   const canvas = document.createElement('canvas')
   canvas.width = 8; canvas.height = 8
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
   if (!ctx) throw new Error('Браузер не поддерживает анализ изображения')
-  ctx.drawImage(image, 0, 0, 8, 8)
-  image.close()
+  if ('createImageBitmap' in window) {
+    const image = await createImageBitmap(blob)
+    ctx.drawImage(image, 0, 0, 8, 8)
+    image.close()
+  } else {
+    const url = URL.createObjectURL(blob)
+    try {
+      const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+        const element = new Image()
+        element.onload = () => resolve(element)
+        element.onerror = () => reject(new Error('Не удалось прочитать изображение'))
+        element.src = url
+      })
+      ctx.drawImage(image, 0, 0, 8, 8)
+    } finally { URL.revokeObjectURL(url) }
+  }
   const pixels = ctx.getImageData(0, 0, 8, 8).data
   const values: number[] = []
   for (let i = 0; i < pixels.length; i += 16) values.push(pixels[i] / 255, pixels[i + 1] / 255, pixels[i + 2] / 255)
@@ -66,7 +79,10 @@ export function PhotoSearch() {
   const [totals, setTotals] = useState({ active: 0, sold: 0 })
   const [tab, setTab] = useState<'active' | 'sold'>('active')
   const [loading, setLoading] = useState(false)
+  const [searched, setSearched] = useState(false)
+  const [status, setStatus] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const resultsRef = useRef<HTMLDivElement | null>(null)
   const query = useMemo(() => hint.trim() || (file ? cleanFilename(file.name) : ''), [hint, file])
 
   useEffect(() => {
@@ -75,19 +91,28 @@ export function PhotoSearch() {
     return () => URL.revokeObjectURL(url)
   }, [file])
 
-  async function search() {
-    if (!file) { setError('Сначала выберите фотографию товара.'); return }
-    setLoading(true); setError(null)
+  async function search(selectedFile = file, selectedQuery = query) {
+    if (!selectedFile) { setError('Сначала выберите фотографию товара.'); return }
+    setLoading(true); setSearched(false); setError(null); setStatus('Анализируем фотографию…')
     try {
-      const source = await signatureFromBlob(file)
-      const result = await searchPhotoCandidates(query)
+      const source = await signatureFromBlob(selectedFile)
+      setStatus('Ищем актуальные и проданные лоты…')
+      const result = await searchPhotoCandidates(selectedQuery)
+      setStatus('Сравниваем изображения…')
       const [rankedActive, rankedSold] = await Promise.all([
         rankVisually(result.active, source), rankVisually(result.sold, source),
       ])
       setActive(rankedActive); setSold(rankedSold)
       setTotals({ active: result.activeTotal, sold: result.soldTotal })
+      setSearched(true); setStatus('')
+      requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
     } catch (err) { setError(err instanceof Error ? err.message : 'Не удалось выполнить поиск') }
-    finally { setLoading(false) }
+    finally { setLoading(false); setStatus('') }
+  }
+
+  function chooseFile(selectedFile: File | null) {
+    setFile(selectedFile); setActive([]); setSold([]); setTotals({ active: 0, sold: 0 }); setSearched(false)
+    if (selectedFile) void search(selectedFile, hint.trim() || cleanFilename(selectedFile.name))
   }
 
   return <section className="photo-search">
@@ -98,16 +123,17 @@ export function PhotoSearch() {
     <div className="photo-form">
       <label className={`dropzone ${preview ? 'has-image' : ''}`}>
         {preview ? <img src={preview} alt="Загруженный товар" /> : <><span className="drop-icon">＋</span><strong>Выбрать фото</strong><small>JPG, PNG или WEBP</small></>}
-        <input type="file" accept="image/jpeg,image/png,image/webp" onChange={e => setFile(e.target.files?.[0] || null)} />
+        <input type="file" accept="image/jpeg,image/png,image/webp" onChange={e => chooseFile(e.target.files?.[0] || null)} />
       </label>
       <div className="photo-fields">
         <label><span className="field-label">Бренд или модель — необязательно</span><input value={hint} onChange={e => setHint(e.target.value)} placeholder="Например: Maison Margiela GAT" /></label>
         <p className="field-help">Для точного поиска укажите то, что знаете. Поиск по фото работает по всем категориям и не зависит от фильтра трендов ниже.</p>
-        <button className="primary" type="button" onClick={() => void search()} disabled={loading || !file}>{loading ? 'Сравниваем изображения…' : 'Найти похожие лоты'}</button>
+        <button className="primary" type="button" onClick={() => void search()} disabled={loading || !file}>{loading ? status || 'Ищем…' : searched ? 'Искать ещё раз' : 'Найти похожие лоты'}</button>
+        {loading && <p className="search-status" role="status"><span />{status}</p>}
         {error && <p className="banner">{error}</p>}
       </div>
     </div>
-    {(active.length > 0 || sold.length > 0 || totals.active + totals.sold > 0) && <div className="photo-results">
+    {searched && <div className="photo-results" ref={resultsRef}>
       <div className="result-tabs">
         <button className={tab === 'active' ? 'chip active' : 'chip'} onClick={() => setTab('active')}>Актуальные · {totals.active.toLocaleString('ru-RU')}</button>
         <button className={tab === 'sold' ? 'chip active' : 'chip'} onClick={() => setTab('sold')}>Проданные · {totals.sold.toLocaleString('ru-RU')}</button>

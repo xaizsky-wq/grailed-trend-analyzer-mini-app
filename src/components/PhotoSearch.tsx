@@ -20,6 +20,11 @@ const PRODUCTS = [
   'Louis Vuitton Speedy bag', 'Louis Vuitton Neverfull bag', 'Louis Vuitton Keepall bag', 'Goyard Saint Louis tote bag',
   'Dior Saddle bag', 'Balenciaga City bag', 'Prada Re-Nylon bag', 'Gucci Jackie bag', 'Bottega Veneta Cassette bag',
   'Chrome Hearts crossbody bag', 'Supreme shoulder bag', 'Arc\'teryx backpack', 'Telfar shopping bag',
+  'Essentials hoodie', 'Supreme Box Logo hoodie', 'Stone Island hoodie', 'Nike Tech Fleece hoodie', 'Champion Reverse Weave sweatshirt',
+  'Levi\'s 501 jeans', 'Rick Owens Bauhaus cargo pants', 'Carhartt double knee pants', 'Dickies 874 pants',
+  'Supreme New Era cap', 'Chrome Hearts trucker hat', 'New Era Yankees cap',
+  'Rolex Submariner watch', 'Cartier Santos watch', 'G-Shock watch',
+  'Chrome Hearts jewelry', 'Tiffany & Co. necklace', 'Cartier Love bracelet',
 ]
 
 function money(n: number) { return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n) }
@@ -42,24 +47,30 @@ export function PhotoSearch() {
   useEffect(() => { if (!file) { setPreview(null); return }; const url = URL.createObjectURL(file); setPreview(url); return () => URL.revokeObjectURL(url) }, [file])
 
   async function search(selectedFile = file) {
-    if (!selectedFile) { setError('Сначала выберите фотографию товара.'); return }
+    const manualQuery = hint.trim()
+    if (!selectedFile && !manualQuery) { setError('Загрузите фото или введите название товара.'); return }
     setLoading(true); setSearched(false); setError(null); setMatches([])
     try {
-      const imageUrl = URL.createObjectURL(selectedFile)
-      setStatus('Загружаем бесплатную AI-модель в браузер…')
-      const { pipeline, env } = await import('@huggingface/transformers')
-      env.allowLocalModels = false
-      const classifier = await pipeline('zero-shot-image-classification', 'Xenova/clip-vit-base-patch32', {
-        progress_callback: (progress: { status?: string; progress?: number }) => {
-          if (progress.status === 'progress' && typeof progress.progress === 'number') setStatus(`Загружаем AI-модель… ${Math.round(progress.progress)}%`)
-        },
-      })
-      setStatus('AI определяет бренд и модель…')
-      const labels = PRODUCTS.map(product => `a product photo of ${product}`)
-      const output = await classifier(imageUrl, labels) as ClassifierResult[]
-      URL.revokeObjectURL(imageUrl)
-      const ranked = output.slice(0, 5).map(row => ({ query: row.label.replace(/^a product photo of /, ''), score: row.score }))
-      if (hint.trim()) ranked.unshift({ query: hint.trim(), score: 1 })
+      let ranked: Match[]
+      if (!selectedFile && manualQuery) {
+        ranked = [{ query: manualQuery, score: 1 }]
+      } else {
+        const imageUrl = URL.createObjectURL(selectedFile!)
+        setStatus('Загружаем бесплатную AI-модель в браузер…')
+        const { pipeline, env } = await import('@huggingface/transformers')
+        env.allowLocalModels = false
+        const classifier = await pipeline('zero-shot-image-classification', 'Xenova/clip-vit-base-patch32', {
+          progress_callback: (progress: { status?: string; progress?: number }) => {
+            if (progress.status === 'progress' && typeof progress.progress === 'number') setStatus(`Загружаем AI-модель… ${Math.round(progress.progress)}%`)
+          },
+        })
+        setStatus('AI определяет бренд и модель…')
+        const labels = PRODUCTS.map(product => `a product photo of ${product}`)
+        const output = await classifier(imageUrl, labels) as ClassifierResult[]
+        URL.revokeObjectURL(imageUrl)
+        ranked = output.slice(0, 5).map(row => ({ query: row.label.replace(/^a product photo of /, ''), score: row.score }))
+        if (manualQuery) ranked.unshift({ query: manualQuery, score: 1 })
+      }
       setMatches(ranked.slice(0, 5))
       const query = ranked[0]?.query
       if (!query) throw new Error('AI не смог определить товар')
@@ -76,9 +87,9 @@ export function PhotoSearch() {
   return <section className="photo-search">
     <div className="photo-heading"><div><p className="eyebrow">CLIP vision · бесплатно</p><h2>AI-поиск по фото</h2></div><p>Открытая AI-модель работает прямо на вашем устройстве: определяет наиболее похожий бренд и модель, затем ищет лоты на Grailed.</p></div>
     <div className="photo-form"><label className={`dropzone ${preview ? 'has-image' : ''}`}>{preview ? <img src={preview} alt="Загруженный товар" /> : <><span className="drop-icon">＋</span><strong>Выбрать фото</strong><small>JPG, PNG или WEBP</small></>}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e => chooseFile(e.target.files?.[0] || null)} /></label>
-      <div className="photo-fields"><label><span className="field-label">Бренд или модель — необязательно</span><input value={hint} onChange={e => setHint(e.target.value)} placeholder="Например: Maison Margiela GAT" /></label>
-        <p className="field-help">Первый запуск загружает AI-модель и может занять до минуты. Фото никуда не отправляется.</p>
-        <button className="primary" type="button" onClick={() => void search()} disabled={loading || !file}>{loading ? 'AI анализирует…' : searched ? 'Распознать ещё раз' : 'Распознать и найти'}</button>
+      <div className="photo-fields"><label><span className="field-label">Бренд, модель или название лота — необязательно</span><input value={hint} onChange={e => setHint(e.target.value)} placeholder="Например: Maison Margiela GAT" /></label>
+        <p className="field-help">Можно искать по фото, по названию или совместить оба варианта. Первый запуск AI-модели может занять до минуты. Фото никуда не отправляется.</p>
+        <button className="primary" type="button" onClick={() => void search()} disabled={loading || (!file && !hint.trim())}>{loading ? 'AI анализирует…' : searched ? 'Искать ещё раз' : file ? 'Распознать и найти' : 'Искать по названию'}</button>
         {loading && <p className="search-status" role="status"><span />{status}</p>}{error && <p className="banner">{error}</p>}
         {best && <div className="ai-result"><p className="field-label">AI определил</p><h3>{best.query}</h3><p>Уверенность {Math.round(best.score * 100)}%</p>{best.score < 0.18 && <p className="ai-warning">Низкая уверенность: добавьте бренд или модель в подсказку и повторите поиск.</p>}{matches.length > 1 && <p className="ai-alternatives">Другие варианты: {matches.slice(1, 4).map(x => x.query).join(', ')}</p>}</div>}
       </div></div>

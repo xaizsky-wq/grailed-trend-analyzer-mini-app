@@ -11,10 +11,16 @@ export type PhotoSearchResponse = { activeTotal: number; soldTotal: number; acti
 const CATEGORIES: Category[] = [
   { id: 'sneakers', name: 'Кроссовки' }, { id: 'down_jackets', name: 'Пуховики' },
   { id: 'tshirts', name: 'Футболки' }, { id: 'bags', name: 'Сумки' },
+  { id: 'hoodies', name: 'Худи' }, { id: 'sweatshirts', name: 'Свитшоты' },
+  { id: 'pants', name: 'Брюки' }, { id: 'jeans', name: 'Джинсы' },
+  { id: 'hats', name: 'Головные уборы' }, { id: 'watches', name: 'Часы' },
+  { id: 'jewelry', name: 'Украшения' },
 ]
 const PATHS: Record<string, string[]> = {
   sneakers: ['footwear.hitop_sneakers', 'footwear.lowtop_sneakers'], down_jackets: ['outerwear.parkas'],
   tshirts: ['tops.short_sleeve_shirts', 'tops.long_sleeve_shirts'], bags: ['accessories.bags_luggage'],
+  hoodies: ['tops.hoodies'], sweatshirts: ['tops.sweatshirts'], pants: ['bottoms.pants'], jeans: ['bottoms.jeans'],
+  hats: ['accessories.hats'], watches: ['accessories.watches'], jewelry: ['accessories.jewelry'],
 }
 const QUERIES: Record<string, string> = { down_jackets: 'down jacket OR puffer OR canada goose' }
 const APP_ID = 'MNRWEFSS2Q'

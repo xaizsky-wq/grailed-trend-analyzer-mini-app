@@ -5,6 +5,7 @@ import { PriceRange } from './components/PriceRange'
 import { TopList } from './components/TopList'
 import { PhotoSearch } from './components/PhotoSearch'
 import { PhotoUnique } from './components/PhotoUnique'
+import { PhotoClean } from './components/PhotoClean'
 import { initTelegram, type TelegramUser } from './telegram'
 import {
   fetchCategories,
@@ -20,7 +21,7 @@ function todayIso() {
 }
 
 export default function App() {
-  const [view, setView] = useState<'trends' | 'photo' | 'unique'>('trends')
+  const [view, setView] = useState<'trends' | 'photo' | 'unique' | 'clean'>('trends')
   const [categories, setCategories] = useState<Category[]>([])
   const [categoryId, setCategoryId] = useState('sneakers')
   const [periodType, setPeriodType] = useState<PeriodType>('days_30')
@@ -102,9 +103,10 @@ export default function App() {
         <button type="button" className={view === 'trends' ? 'view-tab active' : 'view-tab'} onClick={() => setView('trends')}>Тренды и продажи</button>
         <button type="button" className={view === 'photo' ? 'view-tab active' : 'view-tab'} onClick={() => setView('photo')}>Поиск по фото</button>
         <button type="button" className={view === 'unique' ? 'view-tab active' : 'view-tab'} onClick={() => setView('unique')}>Remover</button>
+        <button type="button" className={view === 'clean' ? 'view-tab active' : 'view-tab'} onClick={() => setView('clean')}>Очистка следов</button>
       </nav>
 
-      {view === 'photo' ? <PhotoSearch /> : view === 'unique' ? <PhotoUnique /> : <>
+      {view === 'photo' ? <PhotoSearch /> : view === 'unique' ? <PhotoUnique /> : view === 'clean' ? <PhotoClean /> : <>
 
       <section className="controls">
         {bootError && <p className="banner">{bootError}</p>}

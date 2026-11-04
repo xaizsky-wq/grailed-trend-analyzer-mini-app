@@ -56,3 +56,5 @@ html,body,#root{background:radial-gradient(circle at 88% 0,rgba(227,58,52,.11),t
 .remover-selection{border-color:#ff514a;background:rgba(227,58,52,.13)}.remover-selection span{background:#e33a34;color:#fff}.smart-mask-toggle{border-left-color:#e33a34}
 .banner{border-left-color:#e33a34;background:#171010}
 @media(max-width:720px){.mast{box-shadow:0 7px 22px rgba(0,0,0,.35)}.mast h1{text-shadow:none}}
+.clean-preview{display:block;max-width:min(100%,420px);max-height:280px;object-fit:contain;border:1px solid #333;background:#080808}.clean-tool .photo-fields{align-content:start}
+@media(max-width:720px){.view-tabs{display:grid;grid-template-columns:1fr 1fr}.view-tab{min-width:0}.clean-tool .unique-grid{gap:16px}}

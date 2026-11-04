@@ -2,9 +2,10 @@ import { useEffect, useRef, useState, type PointerEvent } from 'react'
 
 type Area = { x: number; y: number; w: number; h: number }
 type Point = { x: number; y: number }
+type Sensitivity = 'precise' | 'balanced' | 'weak'
 const emptyArea: Area = { x: 0, y: 0, w: 0, h: 0 }
 
-function contentAwareFill(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, smartMask: boolean) {
+function contentAwareFill(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, smartMask: boolean, sensitivity: Sensitivity) {
   const canvas = ctx.canvas
   const source = ctx.getImageData(0, 0, canvas.width, canvas.height)
   const output = new ImageData(new Uint8ClampedArray(source.data), source.width, source.height)
@@ -20,12 +21,17 @@ function contentAwareFill(ctx: CanvasRenderingContext2D, x: number, y: number, w
       const max = Math.max(src[i], src[i + 1], src[i + 2]), min = Math.min(src[i], src[i + 1], src[i + 2])
       const contrast = (Math.abs(src[i] - blurred[i]) + Math.abs(src[i + 1] - blurred[i + 1]) + Math.abs(src[i + 2] - blurred[i + 2])) / 3
       const saturation = max - min
-      const paleOverlay = saturation < 38 && (max > 202 || min < 54)
-      const extremeOverlay = max > 238 || min < 22
-      if (contrast > 31 && (paleOverlay || extremeOverlay)) targetMask[py * width + px] = 1
+      const settings = sensitivity === 'precise'
+        ? { contrast: 31, saturation: 38, light: 202, dark: 54, extremeLight: 238, extremeDark: 22 }
+        : sensitivity === 'balanced'
+          ? { contrast: 22, saturation: 72, light: 184, dark: 76, extremeLight: 226, extremeDark: 34 }
+          : { contrast: 15, saturation: 128, light: 158, dark: 98, extremeLight: 210, extremeDark: 48 }
+      const paleOverlay = saturation < settings.saturation && (max > settings.light || min < settings.dark)
+      const extremeOverlay = max > settings.extremeLight || min < settings.extremeDark
+      if (contrast > settings.contrast && (paleOverlay || extremeOverlay || (sensitivity === 'weak' && contrast > 34))) targetMask[py * width + px] = 1
     }
     const visited = new Uint8Array(width * height), filtered = new Uint8Array(width * height)
-    const componentLimit = Math.max(80, Math.round(w * h * .045))
+    const componentLimit = Math.max(80, Math.round(w * h * (sensitivity === 'weak' ? .09 : sensitivity === 'balanced' ? .065 : .045)))
     for (let py = y; py < y + h; py++) for (let px = x; px < x + w; px++) {
       const start = py * width + px
       if (!targetMask[start] || visited[start]) continue
@@ -119,6 +125,7 @@ export function PhotoUnique() {
   const [message, setMessage] = useState('')
   const [area, setArea] = useState<Area>(emptyArea)
   const [smartMask, setSmartMask] = useState(true)
+  const [sensitivity, setSensitivity] = useState<Sensitivity>('balanced')
   const [dragStart, setDragStart] = useState<Point | null>(null)
   const imageRef = useRef<HTMLImageElement>(null)
 
@@ -197,7 +204,7 @@ export function PhotoUnique() {
       canvas.width = Math.max(1, Math.round(image.width * scale)); canvas.height = Math.max(1, Math.round(image.height * scale))
       const ctx = canvas.getContext('2d')!; ctx.drawImage(image, 0, 0, canvas.width, canvas.height)
       const x = Math.round(area.x * scale), y = Math.round(area.y * scale), w = Math.min(canvas.width - x, Math.round(area.w * scale)), h = Math.min(canvas.height - y, Math.round(area.h * scale))
-      const changed = contentAwareFill(ctx, x, y, w, h, smartMask)
+      const changed = contentAwareFill(ctx, x, y, w, h, smartMask, sensitivity)
       const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', .92)); if (!blob) throw new Error('Не удалось подготовить файл')
       if (result) URL.revokeObjectURL(result); setResult(URL.createObjectURL(blob)); setMessage(smartMask ? `Готово: распознано и восстановлено ${changed.toLocaleString('ru-RU')} пикселей водяного знака. Детали фото сохранены.` : 'Готово: вся выделенная область восстановлена, EXIF-метаданные очищены.')
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Не удалось обработать фото') } finally { setBusy(false) }
@@ -220,6 +227,11 @@ export function PhotoUnique() {
         <button className="primary" type="button" onClick={() => void process()} disabled={busy || area.w < 3 || area.h < 3}>{busy ? 'Обработка…' : 'Удалить с заполнением'}</button>
       </div>
       <label className="smart-mask-toggle"><input type="checkbox" checked={smartMask} onChange={event => setSmartMask(event.target.checked)} /><span><strong>Распознавать только водяной знак</strong><small>Сохраняет пиксели фотографии внутри рамки. Отключите только если знак не распознаётся.</small></span></label>
+      {smartMask && <div className="mask-sensitivity"><span className="field-label">Чувствительность распознавания</span><div className="picker">
+        <button type="button" className={sensitivity === 'precise' ? 'chip active' : 'chip'} onClick={() => setSensitivity('precise')}>Точный</button>
+        <button type="button" className={sensitivity === 'balanced' ? 'chip active' : 'chip'} onClick={() => setSensitivity('balanced')}>Баланс</button>
+        <button type="button" className={sensitivity === 'weak' ? 'chip active' : 'chip'} onClick={() => setSensitivity('weak')}>Цветной / слабый</button>
+      </div><small>Если знак остался, выберите «Цветной / слабый». Если задевает одежду — «Точный».</small></div>}
       {message && <p className="search-status" role="status">{busy && <span />}{message}</p>}
       {result && <div className="remover-result"><img src={result} alt="Обработанный результат" /><a className="primary download-link" href={result} download={`grailed-clean-${Date.now()}.jpg`}>Скачать очищенное фото</a></div>}
     </>}

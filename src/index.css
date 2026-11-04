@@ -35,3 +35,24 @@ html,body,#root{background:radial-gradient(circle at 88% 2%,rgba(122,92,255,.16)
 .search-status{display:flex;align-items:center;gap:9px;color:#ddd;margin:0;font-size:.85rem}.search-status span{width:12px;height:12px;border:2px solid #555;border-top-color:#fff;border-radius:50%;animation:photo-spin .7s linear infinite}@keyframes photo-spin{to{transform:rotate(360deg)}}
 .ai-result{border:1px solid #3a3a3a;background:#151515;padding:14px}.ai-result h3{font-size:1.25rem;margin:4px 0}.ai-result p{margin:4px 0;color:#aaa;font-size:.85rem}.ai-result .ai-alternatives{color:#777;font-size:.78rem}
 .ai-result .ai-warning{color:#f0c987;border-left:2px solid #f0c987;padding-left:8px;margin-top:9px}
+
+/* Noir red — restrained fashion editorial */
+:root{--acid:#e33a34;--violet:#ffffff;--ink:#070707;--panel:#111111;--line:#303030;--paper:#f6f6f3;color:#f3f3f1}
+html,body,#root{background:radial-gradient(circle at 88% 0,rgba(227,58,52,.11),transparent 30rem),#070707}
+.mast{background:linear-gradient(140deg,#151515 0%,#090909 62%,#1b0c0c 100%);border-color:#333;box-shadow:0 8px 28px rgba(0,0,0,.35)}
+.mast:after{background:var(--acid);color:#fff}
+.mast h1{text-shadow:none;letter-spacing:-.025em}
+.mast .eyebrow,.field-label,.brand,.score-label,.eyebrow{color:#f05a54}
+.lede{color:#b7b7b3}
+.telegram-profile{border-color:#333;border-left-color:var(--acid);background:#101010;box-shadow:none}
+.telegram-user img,.telegram-avatar{background:var(--acid);box-shadow:0 0 0 2px #f5f5f2;border-radius:50%}
+.telegram-state.online{border-color:var(--acid);color:#ff7772}
+.view-tab{border-color:#303030;color:#a9a9a6}.view-tab.active{background:var(--acid);border-color:var(--acid);color:#fff;box-shadow:none}
+.control-block{background:#101010;border-color:#2f2f2f}
+.chip,.primary,input,.open-toggle{border-color:#3a3a3a;background:#111;color:#ededeb;border-radius:3px}.chip:hover,.open-toggle:hover{border-color:#e85a54;color:#fff}.chip.active,.primary{background:var(--acid);border-color:var(--acid);color:#fff;box-shadow:none}.chip.active .chip-hint{color:#ffd6d3}.primary:hover{transform:none;box-shadow:0 0 0 2px rgba(227,58,52,.25)}
+.row{border-color:#2c2c2c;background:#0f0f0f}.row:hover{background:#151111;border-color:#50302e}.rank,.score strong{color:#f05a54}.thumb{border-color:#343434}.bar{background:#272727}.bar i{background:linear-gradient(90deg,#e33a34,#ffffff)}
+.photo-heading{background:linear-gradient(110deg,#141414,#1a0d0d);border-color:#333}.dropzone{border-color:#d64a45;background:repeating-linear-gradient(135deg,#0d0d0d,#0d0d0d 12px,#111 12px,#111 24px)}
+.photo-card:hover{border-color:#e33a34;box-shadow:0 6px 24px rgba(227,58,52,.12)}
+.remover-selection{border-color:#ff514a;background:rgba(227,58,52,.13)}.remover-selection span{background:#e33a34;color:#fff}.smart-mask-toggle{border-left-color:#e33a34}
+.banner{border-left-color:#e33a34;background:#171010}
+@media(max-width:720px){.mast{box-shadow:0 7px 22px rgba(0,0,0,.35)}.mast h1{text-shadow:none}}

@@ -4,17 +4,42 @@ type Area = { x: number; y: number; w: number; h: number }
 type Point = { x: number; y: number }
 const emptyArea: Area = { x: 0, y: 0, w: 0, h: 0 }
 
-function contentAwareFill(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
+function contentAwareFill(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, smartMask: boolean) {
   const canvas = ctx.canvas
   const source = ctx.getImageData(0, 0, canvas.width, canvas.height)
   const output = new ImageData(new Uint8ClampedArray(source.data), source.width, source.height)
   const src = source.data, dst = output.data
   const width = canvas.width, height = canvas.height
-  const inside = (px: number, py: number) => px >= x && px < x + w && py >= y && py < y + h
+  const targetMask = new Uint8Array(width * height)
+  if (smartMask) {
+    const blurredCanvas = document.createElement('canvas'); blurredCanvas.width = width; blurredCanvas.height = height
+    const blurredCtx = blurredCanvas.getContext('2d')!; blurredCtx.filter = `blur(${Math.max(4, Math.min(14, Math.round(Math.min(w, h) * .06)))}px)`; blurredCtx.drawImage(canvas, 0, 0)
+    const blurred = blurredCtx.getImageData(0, 0, width, height).data
+    for (let py = y; py < y + h; py++) for (let px = x; px < x + w; px++) {
+      const i = (py * width + px) * 4
+      const max = Math.max(src[i], src[i + 1], src[i + 2]), min = Math.min(src[i], src[i + 1], src[i + 2])
+      const contrast = (Math.abs(src[i] - blurred[i]) + Math.abs(src[i + 1] - blurred[i + 1]) + Math.abs(src[i + 2] - blurred[i + 2])) / 3
+      const neutral = max - min < 58, extreme = max > 188 || min < 72
+      if (contrast > 22 && (neutral || extreme || contrast > 46)) targetMask[py * width + px] = 1
+    }
+    const expanded = targetMask.slice()
+    for (let py = y; py < y + h; py++) for (let px = x; px < x + w; px++) if (targetMask[py * width + px]) {
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+        const ex = px + dx, ey = py + dy
+        if (ex >= x && ex < x + w && ey >= y && ey < y + h && dx * dx + dy * dy <= 5) expanded[ey * width + ex] = 1
+      }
+    }
+    targetMask.set(expanded)
+  } else {
+    for (let py = y; py < y + h; py++) targetMask.fill(1, py * width + x, py * width + x + w)
+  }
+  const inside = (px: number, py: number) => px >= 0 && px < width && py >= 0 && py < height && targetMask[py * width + px] === 1
   const known = new Uint8Array(width * height); known.fill(1)
-  for (let py = y; py < y + h; py++) known.fill(0, py * width + x, py * width + x + w)
+  let maskedPixels = 0
+  for (let py = y; py < y + h; py++) for (let px = x; px < x + w; px++) if (targetMask[py * width + px]) { known[py * width + px] = 0; maskedPixels++ }
+  if (smartMask && maskedPixels < Math.max(12, w * h * .002)) throw new Error('В выделении не найден водяной знак. Обведите его плотнее или включите ручное удаление всей области.')
   const pixels: Array<{ x: number; y: number; layer: number }> = []
-  for (let py = y; py < y + h; py++) for (let px = x; px < x + w; px++) pixels.push({ x: px, y: py, layer: Math.min(px - x, x + w - 1 - px, py - y, y + h - 1 - py) })
+  for (let py = y; py < y + h; py++) for (let px = x; px < x + w; px++) if (targetMask[py * width + px]) pixels.push({ x: px, y: py, layer: Math.min(px - x, x + w - 1 - px, py - y, y + h - 1 - py) })
   pixels.sort((a, b) => a.layer - b.layer || ((a.x * 73856093 ^ a.y * 19349663) - (b.x * 73856093 ^ b.y * 19349663)))
   const offsets = [-18, -10, -5, 0, 5, 10, 18]
   const neighbors = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[1,-1],[-1,1],[1,1]]
@@ -56,11 +81,12 @@ function contentAwareFill(ctx: CanvasRenderingContext2D, x: number, y: number, w
   const filled = ctx.getImageData(x, y, w, h)
   for (let py = 0; py < h; py++) for (let px = 0; px < w; px++) {
     const edge = Math.min(px, py, w - 1 - px, h - 1 - py)
-    const mix = Math.max(0, Math.min(1, (feather - edge) / feather)) * .28
+    const mix = targetMask[(y + py) * width + x + px] ? Math.max(0, Math.min(1, (feather - edge) / feather)) * .2 : 0
     const i = (py * w + px) * 4
     for (let channel = 0; channel < 3; channel++) filled.data[i + channel] = filled.data[i + channel] * (1 - mix) + softened.data[i + channel] * mix
   }
   ctx.putImageData(filled, x, y)
+  return maskedPixels
 }
 
 export function PhotoUnique() {
@@ -70,6 +96,7 @@ export function PhotoUnique() {
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [area, setArea] = useState<Area>(emptyArea)
+  const [smartMask, setSmartMask] = useState(true)
   const [dragStart, setDragStart] = useState<Point | null>(null)
   const imageRef = useRef<HTMLImageElement>(null)
 
@@ -148,9 +175,9 @@ export function PhotoUnique() {
       canvas.width = Math.max(1, Math.round(image.width * scale)); canvas.height = Math.max(1, Math.round(image.height * scale))
       const ctx = canvas.getContext('2d')!; ctx.drawImage(image, 0, 0, canvas.width, canvas.height)
       const x = Math.round(area.x * scale), y = Math.round(area.y * scale), w = Math.min(canvas.width - x, Math.round(area.w * scale)), h = Math.min(canvas.height - y, Math.round(area.h * scale))
-      contentAwareFill(ctx, x, y, w, h)
+      const changed = contentAwareFill(ctx, x, y, w, h, smartMask)
       const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', .92)); if (!blob) throw new Error('Не удалось подготовить файл')
-      if (result) URL.revokeObjectURL(result); setResult(URL.createObjectURL(blob)); setMessage('Готово: область удалена, исходные EXIF-метаданные очищены.')
+      if (result) URL.revokeObjectURL(result); setResult(URL.createObjectURL(blob)); setMessage(smartMask ? `Готово: распознано и восстановлено ${changed.toLocaleString('ru-RU')} пикселей водяного знака. Детали фото сохранены.` : 'Готово: вся выделенная область восстановлена, EXIF-метаданные очищены.')
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Не удалось обработать фото') } finally { setBusy(false) }
   }
 
@@ -170,6 +197,7 @@ export function PhotoUnique() {
         <button className="chip" type="button" onClick={() => { setArea(emptyArea); setResult(null); setMessage('Обведите водяной знак мышью.') }}>Сбросить рамку</button>
         <button className="primary" type="button" onClick={() => void process()} disabled={busy || area.w < 3 || area.h < 3}>{busy ? 'Обработка…' : 'Удалить с заполнением'}</button>
       </div>
+      <label className="smart-mask-toggle"><input type="checkbox" checked={smartMask} onChange={event => setSmartMask(event.target.checked)} /><span><strong>Распознавать только водяной знак</strong><small>Сохраняет пиксели фотографии внутри рамки. Отключите только если знак не распознаётся.</small></span></label>
       {message && <p className="search-status" role="status">{busy && <span />}{message}</p>}
       {result && <div className="remover-result"><img src={result} alt="Обработанный результат" /><a className="primary download-link" href={result} download={`grailed-clean-${Date.now()}.jpg`}>Скачать очищенное фото</a></div>}
     </>}

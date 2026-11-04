@@ -38,62 +38,80 @@ function ListingGrid({ items, empty }: { items: PhotoListing[]; empty: string })
 }
 
 export function PhotoSearch() {
-  const [file, setFile] = useState<File | null>(null), [hint, setHint] = useState(''), [preview, setPreview] = useState<string | null>(null)
-  const [matches, setMatches] = useState<Match[]>([]), [active, setActive] = useState<PhotoListing[]>([]), [sold, setSold] = useState<PhotoListing[]>([])
-  const [totals, setTotals] = useState({ active: 0, sold: 0 }), [tab, setTab] = useState<'active' | 'sold'>('active'), [loading, setLoading] = useState(false)
-  const [searched, setSearched] = useState(false), [status, setStatus] = useState(''), [error, setError] = useState<string | null>(null)
+  type BatchResult = { id: string; name: string; preview: string | null; matches: Match[]; active: PhotoListing[]; sold: PhotoListing[]; totals: { active: number; sold: number } }
+  const [files, setFiles] = useState<File[]>([]), [hint, setHint] = useState(''), [previews, setPreviews] = useState<string[]>([])
+  const [results, setResults] = useState<BatchResult[]>([]), [selectedResult, setSelectedResult] = useState(0)
+  const [tab, setTab] = useState<'active' | 'sold'>('active'), [loading, setLoading] = useState(false)
+  const [status, setStatus] = useState(''), [error, setError] = useState<string | null>(null)
   const resultsRef = useRef<HTMLDivElement | null>(null)
 
-  useEffect(() => { if (!file) { setPreview(null); return }; const url = URL.createObjectURL(file); setPreview(url); return () => URL.revokeObjectURL(url) }, [file])
+  useEffect(() => {
+    const urls = files.map(file => URL.createObjectURL(file)); setPreviews(urls)
+    return () => urls.forEach(url => URL.revokeObjectURL(url))
+  }, [files])
 
-  async function search(selectedFile = file) {
+  async function search() {
     const manualQuery = hint.trim()
-    if (!selectedFile && !manualQuery) { setError('Загрузите фото или введите название товара.'); return }
-    setLoading(true); setSearched(false); setError(null); setMatches([])
+    if (!files.length && !manualQuery) { setError('Загрузите фото или введите название товара.'); return }
+    setLoading(true); setError(null); setResults([]); setSelectedResult(0)
     try {
-      let ranked: Match[]
-      if (!selectedFile && manualQuery) {
-        ranked = [{ query: manualQuery, score: 1 }]
-      } else {
-        const imageUrl = URL.createObjectURL(selectedFile!)
+      let classifier: ((image: string, labels: string[]) => Promise<ClassifierResult[]>) | null = null
+      const labels = PRODUCTS.map(product => `a product photo of ${product}`)
+      if (files.length) {
         setStatus('Загружаем бесплатную AI-модель в браузер…')
         const { pipeline, env } = await import('@huggingface/transformers')
         env.allowLocalModels = false
-        const classifier = await pipeline('zero-shot-image-classification', 'Xenova/clip-vit-base-patch32', {
+        classifier = await pipeline('zero-shot-image-classification', 'Xenova/clip-vit-base-patch32', {
           progress_callback: (progress: { status?: string; progress?: number }) => {
             if (progress.status === 'progress' && typeof progress.progress === 'number') setStatus(`Загружаем AI-модель… ${Math.round(progress.progress)}%`)
           },
-        })
-        setStatus('AI определяет бренд и модель…')
-        const labels = PRODUCTS.map(product => `a product photo of ${product}`)
-        const output = await classifier(imageUrl, labels) as ClassifierResult[]
-        URL.revokeObjectURL(imageUrl)
-        ranked = output.slice(0, 5).map(row => ({ query: row.label.replace(/^a product photo of /, ''), score: row.score }))
-        if (manualQuery) ranked.unshift({ query: manualQuery, score: 1 })
+        }) as unknown as (image: string, labels: string[]) => Promise<ClassifierResult[]>
       }
-      setMatches(ranked.slice(0, 5))
-      const query = ranked[0]?.query
-      if (!query) throw new Error('AI не смог определить товар')
-      setStatus(`Ищем ${query} на Grailed…`)
-      const result = await searchPhotoCandidates(query)
-      setActive(result.active); setSold(result.sold); setTotals({ active: result.activeTotal, sold: result.soldTotal }); setSearched(true)
+      const queue: Array<{ file: File | null; preview: string | null }> = files.length ? files.map((file, index) => ({ file, preview: previews[index] || null })) : [{ file: null, preview: null }]
+      const batch: BatchResult[] = []
+      for (let index = 0; index < queue.length; index++) {
+        const item = queue[index]
+        let ranked: Match[] = manualQuery ? [{ query: manualQuery, score: 1 }] : []
+        if (item.file && classifier) {
+          setStatus(`AI анализирует фото ${index + 1} из ${queue.length}: ${item.file.name}`)
+          const imageUrl = URL.createObjectURL(item.file)
+          const output = await classifier(imageUrl, labels)
+          URL.revokeObjectURL(imageUrl)
+          const aiMatches = output.slice(0, 5).map(row => ({ query: row.label.replace(/^a product photo of /, ''), score: row.score }))
+          ranked = manualQuery ? [...ranked, ...aiMatches] : aiMatches
+        }
+        const query = ranked[0]?.query
+        if (!query) continue
+        setStatus(`Ищем лоты для фото ${index + 1} из ${queue.length}: ${query}`)
+        const found = await searchPhotoCandidates(query)
+        batch.push({ id: `${item.file?.name || 'text'}-${index}`, name: item.file?.name || manualQuery, preview: item.preview, matches: ranked.slice(0, 5), active: found.active, sold: found.sold, totals: { active: found.activeTotal, sold: found.soldTotal } })
+        setResults([...batch])
+      }
+      if (!batch.length) throw new Error('AI не смог определить товары')
       requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
     } catch (err) { setError(err instanceof Error ? err.message : 'Не удалось запустить локальную AI-модель') } finally { setLoading(false); setStatus('') }
   }
 
-  function chooseFile(selectedFile: File | null) { setFile(selectedFile); setActive([]); setSold([]); setTotals({ active: 0, sold: 0 }); setSearched(false); setMatches([]); if (selectedFile) void search(selectedFile) }
+  function chooseFiles(selected: FileList | null) {
+    if (!selected) return
+    const incoming = Array.from(selected).filter(file => file.type.startsWith('image/'))
+    setFiles(current => [...current, ...incoming].slice(0, 10)); setResults([]); setError(null)
+  }
+  function removeFile(index: number) { setFiles(current => current.filter((_, itemIndex) => itemIndex !== index)); setResults([]) }
 
-  const best = matches[0]
+  const current = results[selectedResult]
+  const best = current?.matches[0]
   return <section className="photo-search">
-    <div className="photo-heading"><div><p className="eyebrow">CLIP vision · бесплатно</p><h2>AI-поиск по фото</h2></div><p>Открытая AI-модель работает прямо на вашем устройстве: определяет наиболее похожий бренд и модель, затем ищет лоты на Grailed.</p></div>
-    <div className="photo-form"><label className={`dropzone ${preview ? 'has-image' : ''}`}>{preview ? <img src={preview} alt="Загруженный товар" /> : <><span className="drop-icon">＋</span><strong>Выбрать фото</strong><small>JPG, PNG или WEBP</small></>}<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e => chooseFile(e.target.files?.[0] || null)} /></label>
+    <div className="photo-heading"><div><p className="eyebrow">CLIP vision · batch</p><h2>AI-поиск по фото</h2></div><p>Загрузите до 10 фотографий. AI последовательно определит каждый товар и отдельно найдёт для него актуальные и проданные лоты.</p></div>
+    <div className="photo-form"><div><label className="dropzone multi-dropzone"><span className="drop-icon">＋</span><strong>{files.length ? 'Добавить ещё фото' : 'Выбрать несколько фото'}</strong><small>До 10 файлов · JPG, PNG или WEBP</small><input multiple type="file" accept="image/jpeg,image/png,image/webp" onChange={event => { chooseFiles(event.target.files); event.target.value = '' }} /></label>
+      {files.length > 0 && <div className="upload-queue">{files.map((file, index) => <div className="upload-item" key={`${file.name}-${file.lastModified}`}><img src={previews[index]} alt="" /><span>{file.name}</span><button type="button" aria-label={`Удалить ${file.name}`} onClick={() => removeFile(index)}>×</button></div>)}</div>}</div>
       <div className="photo-fields"><label><span className="field-label">Бренд, модель или название лота — необязательно</span><input value={hint} onChange={e => setHint(e.target.value)} placeholder="Например: Maison Margiela GAT" /></label>
-        <p className="field-help">Можно искать по фото, по названию или совместить оба варианта. Первый запуск AI-модели может занять до минуты. Фото никуда не отправляется.</p>
-        <button className="primary" type="button" onClick={() => void search()} disabled={loading || (!file && !hint.trim())}>{loading ? 'AI анализирует…' : searched ? 'Искать ещё раз' : file ? 'Распознать и найти' : 'Искать по названию'}</button>
+        <p className="field-help">Одна подсказка применяется ко всем выбранным фото. AI-модель загружается один раз, затем обрабатывает очередь. Фотографии никуда не отправляются.</p>
+        <button className="primary" type="button" onClick={() => void search()} disabled={loading || (!files.length && !hint.trim())}>{loading ? `Обработка ${results.length + 1} из ${files.length || 1}…` : results.length ? 'Повторить пакетный поиск' : files.length ? `Распознать ${files.length} фото` : 'Искать по названию'}</button>
         {loading && <p className="search-status" role="status"><span />{status}</p>}{error && <p className="banner">{error}</p>}
-        {best && <div className="ai-result"><p className="field-label">AI определил</p><h3>{best.query}</h3><p>Уверенность {Math.round(best.score * 100)}%</p>{best.score < 0.18 && <p className="ai-warning">Низкая уверенность: добавьте бренд или модель в подсказку и повторите поиск.</p>}{matches.length > 1 && <p className="ai-alternatives">Другие варианты: {matches.slice(1, 4).map(x => x.query).join(', ')}</p>}</div>}
+        {best && <div className="ai-result"><p className="field-label">AI определил · {current.name}</p><h3>{best.query}</h3><p>Уверенность {Math.round(best.score * 100)}%</p>{best.score < 0.18 && <p className="ai-warning">Низкая уверенность: добавьте бренд или модель в подсказку и повторите поиск.</p>}{current.matches.length > 1 && <p className="ai-alternatives">Другие варианты: {current.matches.slice(1, 4).map(x => x.query).join(', ')}</p>}</div>}
       </div></div>
-    {searched && <div className="photo-results" ref={resultsRef}><div className="result-tabs"><button className={tab === 'active' ? 'chip active' : 'chip'} onClick={() => setTab('active')}>Актуальные · {totals.active.toLocaleString('ru-RU')}</button><button className={tab === 'sold' ? 'chip active' : 'chip'} onClick={() => setTab('sold')}>Проданные · {totals.sold.toLocaleString('ru-RU')}</button></div>
-      <p className="field-help">Запрос: <strong>{best?.query}</strong>. Показаны первые 40 Grailed результатов.</p>{tab === 'active' ? <ListingGrid items={active} empty="Актуальных лотов не найдено." /> : <ListingGrid items={sold} empty="Проданных лотов не найдено." />}</div>}
+    {current && <div className="photo-results" ref={resultsRef}>{results.length > 1 && <div className="batch-tabs">{results.map((result, index) => <button type="button" className={selectedResult === index ? 'batch-tab active' : 'batch-tab'} onClick={() => setSelectedResult(index)} key={result.id}>{result.preview && <img src={result.preview} alt="" />}<span>{index + 1}. {result.matches[0]?.query || result.name}</span></button>)}</div>}<div className="result-tabs"><button className={tab === 'active' ? 'chip active' : 'chip'} onClick={() => setTab('active')}>Актуальные · {current.totals.active.toLocaleString('ru-RU')}</button><button className={tab === 'sold' ? 'chip active' : 'chip'} onClick={() => setTab('sold')}>Проданные · {current.totals.sold.toLocaleString('ru-RU')}</button></div>
+      <p className="field-help">Запрос: <strong>{best?.query}</strong>. Показаны первые 40 Grailed результатов для выбранного фото.</p>{tab === 'active' ? <ListingGrid items={current.active} empty="Актуальных лотов не найдено." /> : <ListingGrid items={current.sold} empty="Проданных лотов не найдено." />}</div>}
   </section>
 }

@@ -84,7 +84,7 @@ export default function App() {
       <nav className="view-tabs" aria-label="Разделы анализатора">
         <button type="button" className={view === 'trends' ? 'view-tab active' : 'view-tab'} onClick={() => setView('trends')}>Тренды и продажи</button>
         <button type="button" className={view === 'photo' ? 'view-tab active' : 'view-tab'} onClick={() => setView('photo')}>Поиск по фото</button>
-        <button type="button" className={view === 'unique' ? 'view-tab active' : 'view-tab'} onClick={() => setView('unique')}>Уникализация фото</button>
+        <button type="button" className={view === 'unique' ? 'view-tab active' : 'view-tab'} onClick={() => setView('unique')}>Remover</button>
       </nav>
 
       {view === 'photo' ? <PhotoSearch /> : view === 'unique' ? <PhotoUnique /> : <>

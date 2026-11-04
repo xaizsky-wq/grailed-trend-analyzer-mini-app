@@ -4,6 +4,52 @@ type Area = { x: number; y: number; w: number; h: number }
 type Point = { x: number; y: number }
 const emptyArea: Area = { x: 0, y: 0, w: 0, h: 0 }
 
+function contentAwareFill(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number) {
+  const canvas = ctx.canvas
+  const source = ctx.getImageData(0, 0, canvas.width, canvas.height)
+  const output = new ImageData(new Uint8ClampedArray(source.data), source.width, source.height)
+  const src = source.data, dst = output.data
+  const leftRoom = Math.max(1, x), rightRoom = Math.max(1, canvas.width - x - w)
+  const topRoom = Math.max(1, y), bottomRoom = Math.max(1, canvas.height - y - h)
+  const sample = (px: number, py: number, channel: number) => src[(Math.max(0, Math.min(canvas.height - 1, py)) * canvas.width + Math.max(0, Math.min(canvas.width - 1, px))) * 4 + channel]
+
+  for (let py = y; py < y + h; py++) for (let px = x; px < x + w; px++) {
+    const dl = px - x + 1, dr = x + w - px, dt = py - y + 1, db = y + h - py
+    const candidates = [
+      { x: x - Math.min(dl, leftRoom), y: py, weight: 1 / dl },
+      { x: x + w - 1 + Math.min(dr, rightRoom), y: py, weight: 1 / dr },
+      { x: px, y: y - Math.min(dt, topRoom), weight: 1 / dt },
+      { x: px, y: y + h - 1 + Math.min(db, bottomRoom), weight: 1 / db },
+    ]
+    const diagonalWeight = .42
+    candidates.push(
+      { x: x - Math.min(dl, leftRoom), y: y - Math.min(dt, topRoom), weight: diagonalWeight / Math.hypot(dl, dt) },
+      { x: x + w - 1 + Math.min(dr, rightRoom), y: y - Math.min(dt, topRoom), weight: diagonalWeight / Math.hypot(dr, dt) },
+      { x: x - Math.min(dl, leftRoom), y: y + h - 1 + Math.min(db, bottomRoom), weight: diagonalWeight / Math.hypot(dl, db) },
+      { x: x + w - 1 + Math.min(dr, rightRoom), y: y + h - 1 + Math.min(db, bottomRoom), weight: diagonalWeight / Math.hypot(dr, db) },
+    )
+    const total = candidates.reduce((sum, item) => sum + item.weight, 0)
+    const i = (py * canvas.width + px) * 4
+    for (let channel = 0; channel < 3; channel++) dst[i + channel] = candidates.reduce((sum, item) => sum + sample(item.x, item.y, channel) * item.weight, 0) / total
+    dst[i + 3] = 255
+  }
+
+  ctx.putImageData(output, 0, 0)
+  const feather = Math.max(2, Math.min(12, Math.round(Math.min(w, h) * .08)))
+  const patch = document.createElement('canvas'); patch.width = w; patch.height = h
+  const patchCtx = patch.getContext('2d')!; patchCtx.drawImage(canvas, x, y, w, h, 0, 0, w, h)
+  patchCtx.filter = `blur(${Math.max(2, Math.round(feather / 2))}px)`; patchCtx.drawImage(patch, 0, 0); patchCtx.filter = 'none'
+  const softened = patchCtx.getImageData(0, 0, w, h)
+  const filled = ctx.getImageData(x, y, w, h)
+  for (let py = 0; py < h; py++) for (let px = 0; px < w; px++) {
+    const edge = Math.min(px, py, w - 1 - px, h - 1 - py)
+    const mix = Math.max(0, Math.min(1, (feather - edge) / feather)) * .45
+    const i = (py * w + px) * 4
+    for (let channel = 0; channel < 3; channel++) filled.data[i + channel] = filled.data[i + channel] * (1 - mix) + softened.data[i + channel] * mix
+  }
+  ctx.putImageData(filled, x, y)
+}
+
 export function PhotoUnique() {
   const [file, setFile] = useState<File | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
@@ -89,10 +135,7 @@ export function PhotoUnique() {
       canvas.width = Math.max(1, Math.round(image.width * scale)); canvas.height = Math.max(1, Math.round(image.height * scale))
       const ctx = canvas.getContext('2d')!; ctx.drawImage(image, 0, 0, canvas.width, canvas.height)
       const x = Math.round(area.x * scale), y = Math.round(area.y * scale), w = Math.min(canvas.width - x, Math.round(area.w * scale)), h = Math.min(canvas.height - y, Math.round(area.h * scale))
-      const pad = Math.max(8, Math.round(Math.min(w, h) * .35)); const sx = Math.max(0, x - pad), sy = Math.max(0, y - pad), sw = Math.min(canvas.width - sx, w + pad * 2), sh = Math.min(canvas.height - sy, h + pad * 2)
-      const patch = document.createElement('canvas'); patch.width = sw; patch.height = sh
-      const patchCtx = patch.getContext('2d')!; patchCtx.drawImage(canvas, sx, sy, sw, sh, 0, 0, sw, sh); patchCtx.filter = `blur(${Math.max(10, Math.round(Math.min(w, h) * .28))}px)`; patchCtx.drawImage(patch, 0, 0); patchCtx.filter = 'none'
-      ctx.save(); ctx.beginPath(); ctx.roundRect(x, y, w, h, Math.min(10, w / 4, h / 4)); ctx.clip(); ctx.drawImage(patch, x - sx, y - sy, w, h, x, y, w, h); ctx.restore()
+      contentAwareFill(ctx, x, y, w, h)
       const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', .92)); if (!blob) throw new Error('Не удалось подготовить файл')
       if (result) URL.revokeObjectURL(result); setResult(URL.createObjectURL(blob)); setMessage('Готово: область удалена, исходные EXIF-метаданные очищены.')
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Не удалось обработать фото') } finally { setBusy(false) }
@@ -112,7 +155,7 @@ export function PhotoUnique() {
         <label className="chip replace-photo">Другое фото<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e => choose(e.target.files?.[0] || null)} /></label>
         <button className="chip" type="button" onClick={autoDetect}>Найти автоматически</button>
         <button className="chip" type="button" onClick={() => { setArea(emptyArea); setResult(null); setMessage('Обведите водяной знак мышью.') }}>Сбросить рамку</button>
-        <button className="primary" type="button" onClick={() => void process()} disabled={busy || area.w < 3 || area.h < 3}>{busy ? 'Обработка…' : 'Удалить выделенное'}</button>
+        <button className="primary" type="button" onClick={() => void process()} disabled={busy || area.w < 3 || area.h < 3}>{busy ? 'Обработка…' : 'Удалить с заполнением'}</button>
       </div>
       {message && <p className="search-status" role="status">{busy && <span />}{message}</p>}
       {result && <div className="remover-result"><img src={result} alt="Обработанный результат" /><a className="primary download-link" href={result} download={`grailed-clean-${Date.now()}.jpg`}>Скачать очищенное фото</a></div>}

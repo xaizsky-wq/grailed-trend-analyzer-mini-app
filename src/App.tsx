@@ -4,6 +4,7 @@ import { PeriodPicker } from './components/PeriodPicker'
 import { PriceRange } from './components/PriceRange'
 import { TopList } from './components/TopList'
 import { PhotoSearch } from './components/PhotoSearch'
+import { PhotoUnique } from './components/PhotoUnique'
 import {
   fetchCategories,
   fetchTrends,
@@ -18,7 +19,7 @@ function todayIso() {
 }
 
 export default function App() {
-  const [view, setView] = useState<'trends' | 'photo'>('trends')
+  const [view, setView] = useState<'trends' | 'photo' | 'unique'>('trends')
   const [categories, setCategories] = useState<Category[]>([])
   const [categoryId, setCategoryId] = useState('sneakers')
   const [periodType, setPeriodType] = useState<PeriodType>('days_30')
@@ -83,9 +84,10 @@ export default function App() {
       <nav className="view-tabs" aria-label="Разделы анализатора">
         <button type="button" className={view === 'trends' ? 'view-tab active' : 'view-tab'} onClick={() => setView('trends')}>Тренды и продажи</button>
         <button type="button" className={view === 'photo' ? 'view-tab active' : 'view-tab'} onClick={() => setView('photo')}>Поиск по фото</button>
+        <button type="button" className={view === 'unique' ? 'view-tab active' : 'view-tab'} onClick={() => setView('unique')}>Уникализация фото</button>
       </nav>
 
-      {view === 'photo' ? <PhotoSearch /> : <>
+      {view === 'photo' ? <PhotoSearch /> : view === 'unique' ? <PhotoUnique /> : <>
 
       <section className="controls">
         {bootError && <p className="banner">{bootError}</p>}

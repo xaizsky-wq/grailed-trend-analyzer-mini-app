@@ -18,6 +18,7 @@ function todayIso() {
 }
 
 export default function App() {
+  const [view, setView] = useState<'trends' | 'photo'>('trends')
   const [categories, setCategories] = useState<Category[]>([])
   const [categoryId, setCategoryId] = useState('sneakers')
   const [periodType, setPeriodType] = useState<PeriodType>('days_30')
@@ -79,7 +80,12 @@ export default function App() {
         </p>
       </header>
 
-      <PhotoSearch />
+      <nav className="view-tabs" aria-label="Разделы анализатора">
+        <button type="button" className={view === 'trends' ? 'view-tab active' : 'view-tab'} onClick={() => setView('trends')}>Тренды и продажи</button>
+        <button type="button" className={view === 'photo' ? 'view-tab active' : 'view-tab'} onClick={() => setView('photo')}>Поиск по фото</button>
+      </nav>
+
+      {view === 'photo' ? <PhotoSearch /> : <>
 
       <section className="controls">
         {bootError && <p className="banner">{bootError}</p>}
@@ -126,6 +132,7 @@ export default function App() {
           max_price: maxPrice === '' || Number.isNaN(Number(maxPrice)) ? undefined : Number(maxPrice),
         }}
       />
+      </>}
     </div>
   )
 }

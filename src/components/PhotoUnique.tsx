@@ -9,29 +9,42 @@ function contentAwareFill(ctx: CanvasRenderingContext2D, x: number, y: number, w
   const source = ctx.getImageData(0, 0, canvas.width, canvas.height)
   const output = new ImageData(new Uint8ClampedArray(source.data), source.width, source.height)
   const src = source.data, dst = output.data
-  const leftRoom = Math.max(1, x), rightRoom = Math.max(1, canvas.width - x - w)
-  const topRoom = Math.max(1, y), bottomRoom = Math.max(1, canvas.height - y - h)
-  const sample = (px: number, py: number, channel: number) => src[(Math.max(0, Math.min(canvas.height - 1, py)) * canvas.width + Math.max(0, Math.min(canvas.width - 1, px))) * 4 + channel]
+  const width = canvas.width, height = canvas.height
+  const inside = (px: number, py: number) => px >= x && px < x + w && py >= y && py < y + h
+  const known = new Uint8Array(width * height); known.fill(1)
+  for (let py = y; py < y + h; py++) known.fill(0, py * width + x, py * width + x + w)
+  const pixels: Array<{ x: number; y: number; layer: number }> = []
+  for (let py = y; py < y + h; py++) for (let px = x; px < x + w; px++) pixels.push({ x: px, y: py, layer: Math.min(px - x, x + w - 1 - px, py - y, y + h - 1 - py) })
+  pixels.sort((a, b) => a.layer - b.layer || ((a.x * 73856093 ^ a.y * 19349663) - (b.x * 73856093 ^ b.y * 19349663)))
+  const offsets = [-18, -10, -5, 0, 5, 10, 18]
+  const neighbors = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[1,-1],[-1,1],[1,1]]
+  const clampX = (value: number) => Math.max(0, Math.min(width - 1, value))
+  const clampY = (value: number) => Math.max(0, Math.min(height - 1, value))
 
-  for (let py = y; py < y + h; py++) for (let px = x; px < x + w; px++) {
-    const dl = px - x + 1, dr = x + w - px, dt = py - y + 1, db = y + h - py
-    const candidates = [
-      { x: x - Math.min(dl, leftRoom), y: py, weight: 1 / dl },
-      { x: x + w - 1 + Math.min(dr, rightRoom), y: py, weight: 1 / dr },
-      { x: px, y: y - Math.min(dt, topRoom), weight: 1 / dt },
-      { x: px, y: y + h - 1 + Math.min(db, bottomRoom), weight: 1 / db },
-    ]
-    const diagonalWeight = .42
-    candidates.push(
-      { x: x - Math.min(dl, leftRoom), y: y - Math.min(dt, topRoom), weight: diagonalWeight / Math.hypot(dl, dt) },
-      { x: x + w - 1 + Math.min(dr, rightRoom), y: y - Math.min(dt, topRoom), weight: diagonalWeight / Math.hypot(dr, dt) },
-      { x: x - Math.min(dl, leftRoom), y: y + h - 1 + Math.min(db, bottomRoom), weight: diagonalWeight / Math.hypot(dl, db) },
-      { x: x + w - 1 + Math.min(dr, rightRoom), y: y + h - 1 + Math.min(db, bottomRoom), weight: diagonalWeight / Math.hypot(dr, db) },
-    )
-    const total = candidates.reduce((sum, item) => sum + item.weight, 0)
-    const i = (py * canvas.width + px) * 4
-    for (let channel = 0; channel < 3; channel++) dst[i + channel] = candidates.reduce((sum, item) => sum + sample(item.x, item.y, channel) * item.weight, 0) / total
-    dst[i + 3] = 255
+  for (const pixel of pixels) {
+    const candidates: Array<[number, number]> = []
+    for (const shift of offsets) {
+      candidates.push([clampX(x - 1 - pixel.layer), clampY(pixel.y + shift)])
+      candidates.push([clampX(x + w + pixel.layer), clampY(pixel.y + shift)])
+      candidates.push([clampX(pixel.x + shift), clampY(y - 1 - pixel.layer)])
+      candidates.push([clampX(pixel.x + shift), clampY(y + h + pixel.layer)])
+    }
+    let best = candidates[0], bestScore = Number.POSITIVE_INFINITY
+    for (const candidate of candidates) {
+      if (inside(candidate[0], candidate[1])) continue
+      let score = 0, compared = 0
+      for (const [dx, dy] of neighbors) {
+        const tx = pixel.x + dx, ty = pixel.y + dy
+        if (tx < 0 || tx >= width || ty < 0 || ty >= height || !known[ty * width + tx]) continue
+        const sx = clampX(candidate[0] + dx), sy = clampY(candidate[1] + dy)
+        const ti = (ty * width + tx) * 4, si = (sy * width + sx) * 4
+        score += Math.abs(dst[ti] - src[si]) + Math.abs(dst[ti + 1] - src[si + 1]) + Math.abs(dst[ti + 2] - src[si + 2]); compared++
+      }
+      if (compared && score / compared < bestScore) { bestScore = score / compared; best = candidate }
+    }
+    const target = (pixel.y * width + pixel.x) * 4, chosen = (best[1] * width + best[0]) * 4
+    dst[target] = src[chosen]; dst[target + 1] = src[chosen + 1]; dst[target + 2] = src[chosen + 2]; dst[target + 3] = 255
+    known[pixel.y * width + pixel.x] = 1
   }
 
   ctx.putImageData(output, 0, 0)
@@ -43,7 +56,7 @@ function contentAwareFill(ctx: CanvasRenderingContext2D, x: number, y: number, w
   const filled = ctx.getImageData(x, y, w, h)
   for (let py = 0; py < h; py++) for (let px = 0; px < w; px++) {
     const edge = Math.min(px, py, w - 1 - px, h - 1 - py)
-    const mix = Math.max(0, Math.min(1, (feather - edge) / feather)) * .45
+    const mix = Math.max(0, Math.min(1, (feather - edge) / feather)) * .28
     const i = (py * w + px) * 4
     for (let channel = 0; channel < 3; channel++) filled.data[i + channel] = filled.data[i + channel] * (1 - mix) + softened.data[i + channel] * mix
   }

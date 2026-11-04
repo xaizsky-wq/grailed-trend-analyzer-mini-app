@@ -19,14 +19,36 @@ function contentAwareFill(ctx: CanvasRenderingContext2D, x: number, y: number, w
       const i = (py * width + px) * 4
       const max = Math.max(src[i], src[i + 1], src[i + 2]), min = Math.min(src[i], src[i + 1], src[i + 2])
       const contrast = (Math.abs(src[i] - blurred[i]) + Math.abs(src[i + 1] - blurred[i + 1]) + Math.abs(src[i + 2] - blurred[i + 2])) / 3
-      const neutral = max - min < 58, extreme = max > 188 || min < 72
-      if (contrast > 22 && (neutral || extreme || contrast > 46)) targetMask[py * width + px] = 1
+      const saturation = max - min
+      const paleOverlay = saturation < 38 && (max > 202 || min < 54)
+      const extremeOverlay = max > 238 || min < 22
+      if (contrast > 31 && (paleOverlay || extremeOverlay)) targetMask[py * width + px] = 1
     }
-    const expanded = targetMask.slice()
-    for (let py = y; py < y + h; py++) for (let px = x; px < x + w; px++) if (targetMask[py * width + px]) {
-      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+    const visited = new Uint8Array(width * height), filtered = new Uint8Array(width * height)
+    const componentLimit = Math.max(80, Math.round(w * h * .045))
+    for (let py = y; py < y + h; py++) for (let px = x; px < x + w; px++) {
+      const start = py * width + px
+      if (!targetMask[start] || visited[start]) continue
+      const queue: Array<[number, number]> = [[px, py]], component: Array<[number, number]> = []; visited[start] = 1
+      let minX = px, maxX = px, minY = py, maxY = py
+      for (let cursor = 0; cursor < queue.length; cursor++) {
+        const [cx, cy] = queue[cursor]; component.push([cx, cy]); minX = Math.min(minX, cx); maxX = Math.max(maxX, cx); minY = Math.min(minY, cy); maxY = Math.max(maxY, cy)
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const nx = cx + dx, ny = cy + dy
+          if (nx < x || nx >= x + w || ny < y || ny >= y + h) continue
+          const ni = ny * width + nx
+          if (targetMask[ni] && !visited[ni]) { visited[ni] = 1; queue.push([nx, ny]) }
+        }
+      }
+      const boxArea = (maxX - minX + 1) * (maxY - minY + 1), density = component.length / boxArea
+      const textLike = component.length >= 2 && component.length <= componentLimit && (component.length < 24 || density < .78)
+      if (textLike) for (const [cx, cy] of component) filtered[cy * width + cx] = 1
+    }
+    const expanded = filtered.slice()
+    for (let py = y; py < y + h; py++) for (let px = x; px < x + w; px++) if (filtered[py * width + px]) {
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
         const ex = px + dx, ey = py + dy
-        if (ex >= x && ex < x + w && ey >= y && ey < y + h && dx * dx + dy * dy <= 5) expanded[ey * width + ex] = 1
+        if (ex >= x && ex < x + w && ey >= y && ey < y + h) expanded[ey * width + ex] = 1
       }
     }
     targetMask.set(expanded)

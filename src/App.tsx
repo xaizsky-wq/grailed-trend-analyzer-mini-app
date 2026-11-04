@@ -5,6 +5,7 @@ import { PriceRange } from './components/PriceRange'
 import { TopList } from './components/TopList'
 import { PhotoSearch } from './components/PhotoSearch'
 import { PhotoUnique } from './components/PhotoUnique'
+import { initTelegram, type TelegramUser } from './telegram'
 import {
   fetchCategories,
   fetchTrends,
@@ -31,6 +32,14 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [bootError, setBootError] = useState<string | null>(null)
+  const [telegramUser, setTelegramUser] = useState<TelegramUser | null>(null)
+  const [insideTelegram, setInsideTelegram] = useState(false)
+
+  useEffect(() => {
+    const telegram = initTelegram()
+    setInsideTelegram(Boolean(telegram?.initData))
+    setTelegramUser(telegram?.initDataUnsafe.user ?? null)
+  }, [])
 
   useEffect(() => {
     fetchCategories()
@@ -80,6 +89,14 @@ export default function App() {
           топ не попадают.
         </p>
       </header>
+
+      <section className="telegram-profile" aria-label="Telegram Mini App">
+        <div className="telegram-user">
+          {telegramUser?.photo_url ? <img src={telegramUser.photo_url} alt="" /> : <span className="telegram-avatar">{telegramUser?.first_name?.slice(0, 1).toUpperCase() || 'T'}</span>}
+          <div><p className="eyebrow">TELEGRAM MINI APP</p><strong>{telegramUser ? `${telegramUser.first_name}${telegramUser.last_name ? ` ${telegramUser.last_name}` : ''}` : 'Гостевой режим'}</strong><small>{telegramUser?.username ? `@${telegramUser.username}` : insideTelegram ? `ID ${telegramUser?.id ?? ''}` : 'Откройте приложение через Telegram-бота'}</small></div>
+        </div>
+        <span className={insideTelegram ? 'telegram-state online' : 'telegram-state'}>{insideTelegram ? 'Подключено' : 'Предпросмотр'}</span>
+      </section>
 
       <nav className="view-tabs" aria-label="Разделы анализатора">
         <button type="button" className={view === 'trends' ? 'view-tab active' : 'view-tab'} onClick={() => setView('trends')}>Тренды и продажи</button>

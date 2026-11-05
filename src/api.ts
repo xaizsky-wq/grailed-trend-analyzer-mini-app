@@ -17,12 +17,13 @@ const CATEGORIES: Category[] = [
   { id: 'jewelry', name: 'Украшения' },
 ]
 const PATHS: Record<string, string[]> = {
-  sneakers: ['footwear.hitop_sneakers', 'footwear.lowtop_sneakers'], down_jackets: ['outerwear.parkas'],
+  sneakers: ['footwear.hitop_sneakers', 'footwear.lowtop_sneakers'], down_jackets: ['outerwear.parkas', 'outerwear.heavy_coats', 'outerwear.light_jackets'],
   tshirts: ['tops.short_sleeve_shirts', 'tops.long_sleeve_shirts'], bags: ['accessories.bags_luggage'],
-  hoodies: ['tops.hoodies'], sweatshirts: ['tops.sweatshirts'], pants: ['bottoms.pants'], jeans: ['bottoms.jeans'],
-  hats: ['accessories.hats'], watches: ['accessories.watches'], jewelry: ['accessories.jewelry'],
+  hoodies: ['tops.sweatshirts_hoodies'], sweatshirts: ['tops.sweatshirts_hoodies'],
+  pants: ['bottoms.casual_pants', 'bottoms.sweatpants_joggers', 'bottoms.cropped_pants'], jeans: ['bottoms.denim'],
+  hats: ['accessories.hats'], watches: ['accessories.jewelry_watches'], jewelry: ['accessories.jewelry_watches'],
 }
-const QUERIES: Record<string, string> = { down_jackets: 'down jacket OR puffer OR canada goose' }
+const QUERIES: Record<string, string> = { down_jackets: 'puffer', sweatshirts: 'sweatshirt' }
 const APP_ID = 'MNRWEFSS2Q'
 const SEARCH_KEY = 'c89dbaddf15fe70e1941a109bf7c2a3d'
 
@@ -31,18 +32,34 @@ export async function fetchCategories() { return CATEGORIES }
 function windowFor(type: PeriodType, season?: Season, date?: string) {
   const end = new Date()
   let start = new Date(end)
-  const days = { current: 1, days_7: 7, days_30: 30, days_90: 90 } as const
-  if (type in days) start.setDate(start.getDate() - days[type as keyof typeof days])
-  else if (type === 'custom_date' && date) { start = new Date(`${date}T00:00:00Z`); end.setTime(new Date(`${date}T23:59:59Z`).getTime()) }
+  const days = { days_7: 7, days_30: 30, days_90: 90 } as const
+  if (type === 'current') start = new Date(end.getFullYear(), end.getMonth(), end.getDate(), 0, 0, 0, 0)
+  else if (type in days) start.setDate(start.getDate() - days[type as keyof typeof days])
+  else if (type === 'custom_date' && date) {
+    const [year, month, day] = date.split('-').map(Number)
+    start = new Date(year, month - 1, day, 0, 0, 0, 0)
+    end.setTime(new Date(year, month - 1, day, 23, 59, 59, 999).getTime())
+  }
   else if (type === 'season') {
-    const months = { spring: 2, summer: 5, autumn: 8, winter: 11 }
-    const month = months[season || 'winter']; let year = end.getUTCFullYear()
-    if (month === 11 ? end.getUTCMonth() < 2 : end.getUTCMonth() < month) year--
-    start = new Date(Date.UTC(year, month, 1))
-    const seasonEnd = new Date(Date.UTC(year + (month === 11 ? 1 : 0), (month + 3) % 12, 0, 23, 59, 59))
+    const month = { spring: 2, summer: 5, autumn: 8, winter: 11 }[season || 'winter']
+    let year = end.getFullYear()
+    let candidate = new Date(year, month, 1, 0, 0, 0, 0)
+    if (candidate > end) { year--; candidate = new Date(year, month, 1, 0, 0, 0, 0) }
+    start = candidate
+    const seasonEnd = new Date(year, month + 3, 0, 23, 59, 59, 999)
     if (seasonEnd < end) end.setTime(seasonEnd.getTime())
   }
   return [Math.floor(start.getTime() / 1000), Math.floor(end.getTime() / 1000)]
+}
+
+function categoryHitMatches(category: string, hit: any) {
+  const text = `${hit.title || ''} ${Array.isArray(hit.designer_names) ? hit.designer_names.join(' ') : hit.designer_names || ''}`.toLowerCase()
+  if (category === 'down_jackets') return /\b(puffer|down|nuptse|maya|expedition|parka)\b/.test(text)
+  if (category === 'hoodies') return /\b(hoodie|hooded|zip[- ]?up)\b/.test(text)
+  if (category === 'sweatshirts') return /\b(sweatshirt|crewneck|sweater)\b/.test(text)
+  if (category === 'watches') return /\b(watch|rolex|submariner|datejust|santos|g[- ]?shock|casio|seiko|omega)\b/.test(text)
+  if (category === 'jewelry') return /\b(jewelry|necklace|bracelet|ring|pendant|chain|earring|bangle|brooch)\b/.test(text)
+  return true
 }
 
 function keyFor(brand: string, title: string) {
@@ -135,6 +152,7 @@ export async function fetchTrends(params: { category_id: string; period_type: Pe
   for (let page = 0; page < 8; page++) { const data = await query(params.category_id, page, start, end, params.min_price, params.max_price); hits.push(...(data.hits || [])); if (page + 1 >= data.nbPages) break }
   const groups = new Map<string, { brand: string; prices: number[]; sellers: Set<string>; image?: string; count: number }>()
   for (const hit of hits) {
+    if (!categoryHitMatches(params.category_id, hit)) continue
     const brand = Array.isArray(hit.designer_names) ? hit.designer_names.join(' × ') : String(hit.designer_names || '')
     const title = String(hit.title || ''); const key = keyFor(brand, title); if (!key.split('|')[1]) continue
     const group: { brand: string; prices: number[]; sellers: Set<string>; image?: string; count: number } = groups.get(key) || { brand, prices: [], sellers: new Set<string>(), image: undefined, count: 0 }
@@ -155,6 +173,7 @@ export async function fetchModelItems(params: { category_id: string; model_key: 
   const hits: any[] = []
   for (let page = 0; page < 3; page++) { const data = await query(params.category_id, page, start, end, params.min_price, params.max_price, searchText); hits.push(...(data.hits || [])); if (page + 1 >= data.nbPages) break }
   const matching = hits.filter(hit => {
+    if (!categoryHitMatches(params.category_id, hit)) return false
     const hitBrand = Array.isArray(hit.designer_names) ? hit.designer_names.join(' × ') : String(hit.designer_names || '')
     return keyFor(hitBrand, String(hit.title || '')) === params.model_key
   })

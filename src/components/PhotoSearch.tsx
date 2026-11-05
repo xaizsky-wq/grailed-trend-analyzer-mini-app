@@ -4,6 +4,7 @@ import { downloadListingGallery } from '../downloadImage'
 
 type Match = { query: string; score: number }
 type ClassifierResult = { label: string; score: number }
+type ImageClassifier = ((image: string, labels: string[]) => Promise<ClassifierResult[]>) & { dispose?: () => void | Promise<void> }
 
 const PRODUCTS = [
   'Nike Air Force 1 sneakers', 'Nike Dunk Low sneakers', 'Nike Dunk High sneakers', 'Nike Air Max 95 sneakers', 'Nike Air Max 97 sneakers',
@@ -32,7 +33,7 @@ function money(n: number) { return new Intl.NumberFormat('en-US', { style: 'curr
 
 function ListingGrid({ items, empty }: { items: PhotoListing[]; empty: string }) {
   if (!items.length) return <p className="photo-empty">{empty}</p>
-  return <div className="photo-grid">{items.slice(0, 20).map(item => <article className="photo-card" key={`${item.status}-${item.id}`}>
+  return <div className="photo-grid">{items.map(item => <article className="photo-card" key={`${item.status}-${item.id}`}>
     <div className="photo-card-image">{item.image_url ? <><a href={item.grailed_url} target="_blank" rel="noreferrer"><img src={item.image_url} alt="" loading="lazy" decoding="async" /></a><button type="button" className="image-download gallery-download" aria-label="Скачать все фото объявления" title={`Скачать все фото${item.photo_count ? ` (${item.photo_count})` : ''} в максимальном качестве`} onClick={() => void downloadListingGallery(item.id, item.title).catch(error => window.alert(error instanceof Error ? error.message : 'Не удалось скачать галерею'))}>ZIP</button></> : <div className="photo-placeholder" />}</div>
     <div className="photo-card-body"><p className="brand">{item.brand || '—'}</p><h4>{item.title}</h4><p><strong>{money(item.price)}</strong>{item.color ? ` · ${item.color}` : ''}</p><a className="photo-card-link" href={item.grailed_url} target="_blank" rel="noreferrer">Лот ↗</a></div>
   </article>)}</div>
@@ -55,8 +56,8 @@ export function PhotoSearch() {
     const manualQuery = hint.trim()
     if (!files.length && !manualQuery) { setError('Загрузите фото или введите название товара.'); return }
     setLoading(true); setError(null); setResults([]); setSelectedResult(0)
+    let classifier: ImageClassifier | null = null
     try {
-      let classifier: ((image: string, labels: string[]) => Promise<ClassifierResult[]>) | null = null
       const labels = PRODUCTS.map(product => `a product photo of ${product}`)
       if (files.length) {
         setStatus('Загружаем бесплатную AI-модель в браузер…')
@@ -67,7 +68,7 @@ export function PhotoSearch() {
           progress_callback: (progress: { status?: string; progress?: number }) => {
             if (progress.status === 'progress' && typeof progress.progress === 'number') setStatus(`Загружаем AI-модель… ${Math.round(progress.progress)}%`)
           },
-        }) as unknown as (image: string, labels: string[]) => Promise<ClassifierResult[]>
+        }) as unknown as ImageClassifier
       }
       const queue: Array<{ file: File | null; preview: string | null }> = files.length ? files.map((file, index) => ({ file, preview: previews[index] || null })) : [{ file: null, preview: null }]
       const batch: BatchResult[] = []
@@ -87,11 +88,14 @@ export function PhotoSearch() {
         setStatus(`Ищем лоты для фото ${index + 1} из ${queue.length}: ${query}`)
         const found = await searchPhotoCandidates(query)
         batch.push({ id: `${item.file?.name || 'text'}-${index}`, name: item.file?.name || manualQuery, preview: item.preview, matches: ranked.slice(0, 5), active: found.active, sold: found.sold, totals: { active: found.activeTotal, sold: found.soldTotal } })
-        setResults([...batch])
       }
       if (!batch.length) throw new Error('AI не смог определить товары')
+      setResults(batch)
       requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
-    } catch (err) { setError(err instanceof Error ? err.message : 'Не удалось запустить локальную AI-модель') } finally { setLoading(false); setStatus('') }
+    } catch (err) { setError(err instanceof Error ? err.message : 'Не удалось запустить локальную AI-модель') } finally {
+      try { await classifier?.dispose?.() } catch { /* model cleanup is best-effort */ }
+      setLoading(false); setStatus('')
+    }
   }
 
   function chooseFiles(selected: FileList | null) {
@@ -114,6 +118,6 @@ export function PhotoSearch() {
         {best && <div className="ai-result"><p className="field-label">AI определил · {current.name}</p><h3>{best.query}</h3><p>Уверенность {Math.round(best.score * 100)}%</p>{best.score < 0.18 && <p className="ai-warning">Низкая уверенность: добавьте бренд или модель в подсказку и повторите поиск.</p>}{current.matches.length > 1 && <p className="ai-alternatives">Другие варианты: {current.matches.slice(1, 4).map(x => x.query).join(', ')}</p>}</div>}
       </div></div>
     {current && <div className="photo-results" ref={resultsRef}>{results.length > 1 && <div className="batch-tabs">{results.map((result, index) => <button type="button" className={selectedResult === index ? 'batch-tab active' : 'batch-tab'} onClick={() => setSelectedResult(index)} key={result.id}>{result.preview && <img src={result.preview} alt="" />}<span>{index + 1}. {result.matches[0]?.query || result.name}</span></button>)}</div>}<div className="result-tabs"><button className={tab === 'active' ? 'chip active' : 'chip'} onClick={() => setTab('active')}>Актуальные · {current.totals.active.toLocaleString('ru-RU')}</button><button className={tab === 'sold' ? 'chip active' : 'chip'} onClick={() => setTab('sold')}>Проданные · {current.totals.sold.toLocaleString('ru-RU')}</button></div>
-      <p className="field-help">Запрос: <strong>{best?.query}</strong>. Показаны первые 40 Grailed результатов для выбранного фото.</p>{tab === 'active' ? <ListingGrid items={current.active} empty="Актуальных лотов не найдено." /> : <ListingGrid items={current.sold} empty="Проданных лотов не найдено." />}</div>}
+      <p className="field-help">Запрос: <strong>{best?.query}</strong>. Загружены все {tab === 'active' ? current.active.length : current.sold.length} результатов выборки; карточки вне экрана не отрисовываются.</p>{tab === 'active' ? <ListingGrid items={current.active} empty="Актуальных лотов не найдено." /> : <ListingGrid items={current.sold} empty="Проданных лотов не найдено." />}</div>}
   </section>
 }

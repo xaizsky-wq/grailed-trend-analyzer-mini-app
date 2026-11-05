@@ -5,6 +5,19 @@ import { downloadListingGallery } from '../downloadImage'
 type Match = { query: string; score: number }
 type ClassifierResult = { label: string; score: number }
 
+async function classifierImage(file: File) {
+  const source = URL.createObjectURL(file)
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image(); element.onload = () => resolve(element); element.onerror = reject; element.src = source
+    })
+    const size = 384, scale = Math.min(1, size / Math.max(image.naturalWidth, image.naturalHeight))
+    const canvas = document.createElement('canvas'); canvas.width = Math.max(1, Math.round(image.naturalWidth * scale)); canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
+    canvas.getContext('2d', { alpha: false })?.drawImage(image, 0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL('image/jpeg', .82)
+  } finally { URL.revokeObjectURL(source) }
+}
+
 const PRODUCTS = [
   'Nike Air Force 1 sneakers', 'Nike Dunk Low sneakers', 'Nike Dunk High sneakers', 'Nike Air Max 95 sneakers', 'Nike Air Max 97 sneakers',
   'Nike Air Jordan 1 sneakers', 'Nike Air Jordan 3 sneakers', 'Nike Air Jordan 4 sneakers', 'Nike Air Jordan 5 sneakers', 'Nike Air Jordan 11 sneakers',
@@ -58,12 +71,13 @@ export function PhotoSearch() {
     try {
       let classifier: ((image: string, labels: string[]) => Promise<ClassifierResult[]>) | null = null
       const labels = PRODUCTS.map(product => `a product photo of ${product}`)
-      if (files.length) {
+      if (files.length && !manualQuery) {
         setStatus('Загружаем бесплатную AI-модель в браузер…')
         const { pipeline, env } = await import('@huggingface/transformers')
         env.allowLocalModels = false
         if (env.backends?.onnx?.wasm) env.backends.onnx.wasm.numThreads = 1
         classifier = await pipeline('zero-shot-image-classification', 'Xenova/clip-vit-base-patch32', {
+          dtype: 'q8',
           progress_callback: (progress: { status?: string; progress?: number }) => {
             if (progress.status === 'progress' && typeof progress.progress === 'number') setStatus(`Загружаем AI-модель… ${Math.round(progress.progress)}%`)
           },
@@ -76,9 +90,8 @@ export function PhotoSearch() {
         let ranked: Match[] = manualQuery ? [{ query: manualQuery, score: 1 }] : []
         if (item.file && classifier) {
           setStatus(`AI анализирует фото ${index + 1} из ${queue.length}: ${item.file.name}`)
-          const imageUrl = URL.createObjectURL(item.file)
+          const imageUrl = await classifierImage(item.file)
           const output = await classifier(imageUrl, labels)
-          URL.revokeObjectURL(imageUrl)
           const aiMatches = output.slice(0, 5).map(row => ({ query: row.label.replace(/^a product photo of /, ''), score: row.score }))
           ranked = manualQuery ? [...ranked, ...aiMatches] : aiMatches
         }
@@ -108,7 +121,7 @@ export function PhotoSearch() {
     <div className="photo-form"><div><label className="dropzone multi-dropzone"><span className="drop-icon">＋</span><strong>{files.length ? 'Добавить ещё фото' : 'Выбрать несколько фото'}</strong><small>До 10 файлов · JPG, PNG или WEBP</small><input multiple type="file" accept="image/jpeg,image/png,image/webp" onChange={event => { chooseFiles(event.target.files); event.target.value = '' }} /></label>
       {files.length > 0 && <div className="upload-queue">{files.map((file, index) => <div className="upload-item" key={`${file.name}-${file.lastModified}`}><img src={previews[index]} alt="" /><span>{file.name}</span><button type="button" aria-label={`Удалить ${file.name}`} onClick={() => removeFile(index)}>×</button></div>)}</div>}</div>
       <div className="photo-fields"><label><span className="field-label">Бренд, модель или название лота — необязательно</span><input value={hint} onChange={e => setHint(e.target.value)} placeholder="Например: Maison Margiela GAT" /></label>
-        <p className="field-help">Одна подсказка применяется ко всем выбранным фото. AI-модель загружается один раз, затем обрабатывает очередь. Фотографии никуда не отправляются.</p>
+        <p className="field-help">Если ввести бренд или модель, поиск будет мгновенным и без запуска тяжёлой AI-модели. Без подсказки AI анализирует уменьшенную копию фото локально.</p>
         <button className="primary" type="button" onClick={() => void search()} disabled={loading || (!files.length && !hint.trim())}>{loading ? `Обработка ${results.length + 1} из ${files.length || 1}…` : results.length ? 'Повторить пакетный поиск' : files.length ? `Распознать ${files.length} фото` : 'Искать по названию'}</button>
         {loading && <p className="search-status" role="status"><span />{status}</p>}{error && <p className="banner">{error}</p>}
         {best && <div className="ai-result"><p className="field-label">AI определил · {current.name}</p><h3>{best.query}</h3><p>Уверенность {Math.round(best.score * 100)}%</p>{best.score < 0.18 && <p className="ai-warning">Низкая уверенность: добавьте бренд или модель в подсказку и повторите поиск.</p>}{current.matches.length > 1 && <p className="ai-alternatives">Другие варианты: {current.matches.slice(1, 4).map(x => x.query).join(', ')}</p>}</div>}

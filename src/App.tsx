@@ -74,11 +74,6 @@ export default function App() {
     [categoryId, periodType, season, date, minPrice, maxPrice],
   )
 
-  useEffect(() => {
-    if (!categoryId) return
-    void load(false)
-  }, [load, categoryId])
-
   return (
     <div className="shell">
       <header className="mast">
@@ -131,13 +126,13 @@ export default function App() {
         />
         <div className="actions">
           <button type="button" className="primary" onClick={() => void load(true)} disabled={loading}>
-            Обновить данные
+            {loading ? 'Ищем товары…' : 'Найти товары'}
           </button>
-          <p className="hint">Обновляет выборку продаж для выбранных параметров.</p>
+          <p className="hint">Запрос к Grailed выполняется только после нажатия кнопки.</p>
         </div>
       </section>
 
-      <TopList
+      {!data && !loading && !error ? <div className="state"><p>Выберите категорию, период и нажмите «Найти товары».</p><p className="muted">При открытии приложения запросы не выполняются.</p></div> : <TopList
         items={data?.items ?? []}
         loading={loading}
         error={error}
@@ -152,7 +147,7 @@ export default function App() {
           min_price: minPrice === '' || Number.isNaN(Number(minPrice)) ? undefined : Number(minPrice),
           max_price: maxPrice === '' || Number.isNaN(Number(maxPrice)) ? undefined : Number(maxPrice),
         }}
-      />
+      />}
       </>}
     </div>
   )

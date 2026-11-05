@@ -44,6 +44,62 @@ function json(response, status, value) {
   response.end(JSON.stringify(value))
 }
 
+const crcTable = (() => {
+  const table = new Uint32Array(256)
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; table[n] = c >>> 0 }
+  return table
+})()
+
+function crc32(bytes) { let crc = 0xffffffff; for (const byte of bytes) crc = crcTable[(crc ^ byte) & 255] ^ (crc >>> 8); return (crc ^ 0xffffffff) >>> 0 }
+function u16(value) { const b = Buffer.allocUnsafe(2); b.writeUInt16LE(value); return b }
+function u32(value) { const b = Buffer.allocUnsafe(4); b.writeUInt32LE(value >>> 0); return b }
+function createZip(files) {
+  const local = [], central = []; let offset = 0
+  for (const file of files) {
+    const name = Buffer.from(file.name), size = file.bytes.length, crc = crc32(file.bytes)
+    const entry = Buffer.concat([u32(0x04034b50),u16(20),u16(0x0800),u16(0),u16(0),u16(0),u32(crc),u32(size),u32(size),u16(name.length),u16(0),name,file.bytes])
+    local.push(entry)
+    central.push(Buffer.concat([u32(0x02014b50),u16(20),u16(20),u16(0x0800),u16(0),u16(0),u16(0),u32(crc),u32(size),u32(size),u16(name.length),u16(0),u16(0),u16(0),u16(0),u32(0),u32(offset),name]))
+    offset += entry.length
+  }
+  const localData = Buffer.concat(local), centralData = Buffer.concat(central)
+  return Buffer.concat([localData, centralData, u32(0x06054b50),u16(0),u16(0),u16(files.length),u16(files.length),u32(centralData.length),u32(localData.length),u16(0)])
+}
+
+async function fetchWithTimeout(url, timeout = 20_000) {
+  const controller = new AbortController(), timer = setTimeout(() => controller.abort(), timeout)
+  try { return await fetch(url, { signal: controller.signal, headers: { 'user-agent': 'Mozilla/5.0 GrailedMiniApp/1.0' } }) }
+  finally { clearTimeout(timer) }
+}
+
+async function galleryZip(request, response, id) {
+  if (!/^\d+$/.test(id)) return json(response, 400, { ok: false, error: 'Invalid listing id' })
+  const source = await fetchWithTimeout(`https://r.jina.ai/http://www.grailed.com/api/listings/${id}`)
+  if (!source.ok) throw new Error(`Gallery metadata failed: ${source.status}`)
+  const text = await source.text(), marker = 'Markdown Content:'
+  const payload = JSON.parse(text.includes(marker) ? text.slice(text.indexOf(marker) + marker.length).trim() : text.trim())
+  const urls = (payload?.data?.photos || []).map(photo => photo?.url).filter(Boolean).slice(0, 30)
+  if (!urls.length) return json(response, 404, { ok: false, error: 'No photos found' })
+  const files = []
+  for (let start = 0; start < urls.length; start += 4) {
+    const batch = await Promise.all(urls.slice(start, start + 4).map(async (url, batchIndex) => {
+      const image = await fetchWithTimeout(url, 30_000)
+      if (!image.ok) throw new Error(`Photo download failed: ${image.status}`)
+      const type = image.headers.get('content-type') || ''
+      return { name: `${String(start + batchIndex + 1).padStart(2, '0')}.${type.includes('png') ? 'png' : type.includes('webp') ? 'webp' : 'jpg'}`, bytes: Buffer.from(await image.arrayBuffer()) }
+    }))
+    files.push(...batch)
+  }
+  const archive = createZip(files)
+  response.writeHead(200, {
+    'content-type': 'application/zip',
+    'content-length': archive.length,
+    'content-disposition': `attachment; filename="grailed-${id}-photos.zip"`,
+    'cache-control': 'private, max-age=300',
+  })
+  response.end(archive)
+}
+
 async function serveStatic(request, response) {
   const pathname = decodeURIComponent(new URL(request.url, 'http://localhost').pathname)
   const requested = normalize(pathname).replace(/^(\.\.(\/|\\|$))+/, '')
@@ -57,7 +113,10 @@ async function serveStatic(request, response) {
 
 const server = createServer(async (request, response) => {
   try {
+    const url = new URL(request.url, 'http://localhost')
     if (request.url === '/health') return json(response, 200, { ok: true, bot: Boolean(token), web_app: Boolean(publicUrl) })
+    const galleryMatch = url.pathname.match(/^\/api\/listings\/(\d+)\/gallery\.zip$/)
+    if (galleryMatch && request.method === 'GET') return await galleryZip(request, response, galleryMatch[1])
     if (request.url === '/api/telegram/webhook' && request.method === 'POST') {
       if (webhookSecret && request.headers['x-telegram-bot-api-secret-token'] !== webhookSecret) return json(response, 401, { ok: false })
       let raw = ''

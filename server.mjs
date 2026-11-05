@@ -205,6 +205,7 @@ async function galleryZip(request, response, id) {
     'content-type': 'application/zip',
     'content-length': archive.length,
     'content-disposition': `attachment; filename="grailed-${id}-photos.zip"`,
+    'access-control-allow-origin': 'https://web.telegram.org',
     'cache-control': 'private, max-age=300',
   })
   response.end(archive)

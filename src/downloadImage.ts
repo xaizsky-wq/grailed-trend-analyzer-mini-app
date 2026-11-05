@@ -1,3 +1,5 @@
+import { downloadTelegramFile } from './telegram'
+
 export async function downloadImage(url: string, filename: string) {
   const safeName = filename.replace(/[^a-zA-Z0-9а-яА-ЯёЁ._-]+/g, '-').replace(/-+/g, '-').slice(0, 80) || 'listing-photo'
   try {
@@ -14,10 +16,9 @@ export async function downloadImage(url: string, filename: string) {
 }
 
 export async function downloadListingGallery(id: string, title: string) {
-  void title
   const url = new URL(`/api/listings/${encodeURIComponent(id)}/gallery.zip`, window.location.origin).toString()
-  openExternalUrl(url)
+  const safeTitle = title.replace(/[^a-zA-Z0-9а-яА-ЯёЁ._-]+/g, '-').replace(/-+/g, '-').slice(0, 60) || `grailed-${id}`
+  downloadTelegramFile(url, `${safeTitle}-photos.zip`)
   return true
 }
-import { openExternalUrl } from './telegram'
 

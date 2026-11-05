@@ -84,11 +84,6 @@ function keyFor(brand: string, title: string) {
   return `${brandKey}|${words.slice(0, 2).join(' ')}`
 }
 
-function pretty(key: string, brand: string) {
-  const slug = key.split('|')[1] || key
-  return `${brand.split('×')[0].trim()} ${slug.split(' ').map(x => ['gat','sb'].includes(x) ? x.toUpperCase() : (x[0]?.toUpperCase() || '') + x.slice(1)).join(' ')}`.trim()
-}
-
 async function query(category: string, page: number, start: number, end: number, min?: number, max?: number, textQuery?: string) {
   const numericFilters = [`sold_at_i>=${start}`, `sold_at_i<=${end}`]
   if (min != null) numericFilters.push(`price>=${min}`)
@@ -153,25 +148,15 @@ export async function searchPhotoCandidates(textQuery: string): Promise<PhotoSea
 }
 
 export async function fetchTrends(params: { category_id: string; period_type: PeriodType; season?: Season; date?: string; min_price?: number; max_price?: number; refresh?: boolean }): Promise<TrendsResponse> {
-  const [start, end] = windowFor(params.period_type, params.season, params.date)
-  const first = await query(params.category_id, 0, start, end, params.min_price, params.max_price)
-  const pageCount = Math.min(first.nbPages || 1, 8)
-  const remaining = pageCount > 1 ? await Promise.all(Array.from({ length: pageCount - 1 }, (_, index) => query(params.category_id, index + 1, start, end, params.min_price, params.max_price))) : []
-  const hits: any[] = [...(first.hits || []), ...remaining.flatMap(page => page.hits || [])]
-  const groups = new Map<string, { brand: string; prices: number[]; sellers: Set<string>; image?: string; count: number }>()
-  for (const hit of hits) {
-    if (!categoryHitMatches(params.category_id, hit)) continue
-    const brand = Array.isArray(hit.designer_names) ? hit.designer_names.join(' × ') : String(hit.designer_names || '')
-    const title = String(hit.title || ''); const key = keyFor(brand, title); if (!key.split('|')[1]) continue
-    const group: { brand: string; prices: number[]; sellers: Set<string>; image?: string; count: number } = groups.get(key) || { brand, prices: [], sellers: new Set<string>(), image: undefined, count: 0 }
-    const price = Number(hit.sold_price || hit.price); if (price) group.prices.push(price)
-    const seller = hit.user?.username; if (seller) group.sellers.add(String(seller))
-    group.image ||= hit.cover_photo?.url || hit.cover_photo?.image_url; group.count++; groups.set(key, group)
-  }
-  const ranked = [...groups].filter(([, group]) => group.count >= 2).sort((a,b) => b[1].count - a[1].count).slice(0,10)
-  const maxCount = ranked[0]?.[1].count || 1
-  const items = ranked.map(([key,group], index): TrendItem => ({ rank: index+1, model_key: key, title: pretty(key,group.brand), brand: group.brand, avg_price: group.prices.length ? group.prices.reduce((a,b)=>a+b,0)/group.prices.length : 0, sales_last_30d: group.count, seller_count: group.sellers.size, listing_count: group.count, trend_score: group.count/maxCount, grailed_url: `https://www.grailed.com/shop?query=${encodeURIComponent(key.replace('|',' '))}`, image_url: previewUrl(group.image, 160), status: 'sold' }))
-  return { category_id: params.category_id, period: { type: params.period_type, value: new Date(start*1000).toISOString().slice(0,10) }, generated_at: new Date().toISOString(), message: items.length ? undefined : 'В выбранном периоде и диапазоне нет повторных продаж моделей.', analysis: { sold_sample: hits.length, models_found: groups.size, ranked_by: params.min_price != null || params.max_price != null ? 'sales_in_period_and_price_band' : 'sales_in_period', from_cache: false }, items }
+  const search = new URLSearchParams({ category_id: params.category_id, period_type: params.period_type })
+  if (params.season) search.set('season', params.season)
+  if (params.date) search.set('date', params.date)
+  if (params.min_price != null) search.set('min_price', String(params.min_price))
+  if (params.max_price != null) search.set('max_price', String(params.max_price))
+  if (params.refresh) search.set('refresh', '1')
+  const response = await fetch(`/api/trends?${search.toString()}`)
+  if (!response.ok) throw new Error('Источник данных временно недоступен')
+  return response.json() as Promise<TrendsResponse>
 }
 
 export async function fetchModelItems(params: { category_id: string; model_key: string; period_type: PeriodType; season?: Season; date?: string; min_price?: number; max_price?: number; limit?: number }): Promise<ModelItemsResponse> {

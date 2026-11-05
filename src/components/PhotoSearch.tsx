@@ -44,11 +44,24 @@ const PRODUCTS = [
 function money(n: number) { return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n) }
 
 function ListingGrid({ items, empty }: { items: PhotoListing[]; empty: string }) {
+  const [visibleCount, setVisibleCount] = useState(18)
+  const loadMoreRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => { setVisibleCount(18) }, [items])
+  useEffect(() => {
+    const element = loadMoreRef.current
+    if (!element || visibleCount >= items.length) return
+    if (!('IntersectionObserver' in window)) { setVisibleCount(items.length); return }
+    const observer = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) setVisibleCount(count => Math.min(items.length, count + 18))
+    }, { rootMargin: '300px 0px' })
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [items.length, visibleCount])
   if (!items.length) return <p className="photo-empty">{empty}</p>
-  return <div className="photo-grid">{items.map(item => <article className="photo-card" key={`${item.status}-${item.id}`}>
+  return <><div className="photo-grid">{items.slice(0, visibleCount).map(item => <article className="photo-card" key={`${item.status}-${item.id}`}>
     <div className="photo-card-image">{item.image_url ? <><a href={item.grailed_url} target="_blank" rel="noreferrer"><SmartImage src={item.image_url} /></a><button type="button" className="image-download gallery-download" aria-label="Скачать все фото объявления" title={`Скачать все фото${item.photo_count ? ` (${item.photo_count})` : ''} в максимальном качестве`} onClick={() => void downloadListingGallery(item.id, item.title).catch(error => window.alert(error instanceof Error ? error.message : 'Не удалось скачать галерею'))}>ZIP</button></> : <div className="photo-placeholder" />}</div>
     <div className="photo-card-body"><p className="brand">{item.brand || '—'}</p><h4>{item.title}</h4><p><strong>{money(item.price)}</strong>{item.color ? ` · ${item.color}` : ''}</p><a className="photo-card-link" href={item.grailed_url} target="_blank" rel="noreferrer">Лот ↗</a></div>
-  </article>)}</div>
+  </article>)}</div>{visibleCount < items.length && <div className="results-sentinel" ref={loadMoreRef} aria-label={`Показано ${visibleCount} из ${items.length}`}><span>{visibleCount} / {items.length}</span></div>}</>
 }
 
 export function PhotoSearch() {

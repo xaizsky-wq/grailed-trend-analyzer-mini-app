@@ -1,11 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react'
 import { CategoryPicker } from './components/CategoryPicker'
 import { PeriodPicker } from './components/PeriodPicker'
 import { PriceRange } from './components/PriceRange'
 import { TopList } from './components/TopList'
-import { PhotoSearch } from './components/PhotoSearch'
-import { PhotoUnique } from './components/PhotoUnique'
-import { PhotoClean } from './components/PhotoClean'
 import { initTelegram, type TelegramUser } from './telegram'
 import {
   fetchCategories,
@@ -15,6 +12,10 @@ import {
   type Season,
   type TrendsResponse,
 } from './api'
+
+const PhotoSearch = lazy(() => import('./components/PhotoSearch').then(module => ({ default: module.PhotoSearch })))
+const PhotoUnique = lazy(() => import('./components/PhotoUnique').then(module => ({ default: module.PhotoUnique })))
+const PhotoClean = lazy(() => import('./components/PhotoClean').then(module => ({ default: module.PhotoClean })))
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10)
@@ -101,7 +102,7 @@ export default function App() {
         <button type="button" className={view === 'clean' ? 'view-tab active' : 'view-tab'} onClick={() => setView('clean')}>Очистка следов</button>
       </nav>
 
-      {view === 'photo' ? <PhotoSearch /> : view === 'unique' ? <PhotoUnique /> : view === 'clean' ? <PhotoClean /> : <>
+      {view === 'photo' ? <Suspense fallback={<div className="state"><p>Открываем поиск по фото…</p></div>}><PhotoSearch /></Suspense> : view === 'unique' ? <Suspense fallback={<div className="state"><p>Открываем Remover…</p></div>}><PhotoUnique /></Suspense> : view === 'clean' ? <Suspense fallback={<div className="state"><p>Открываем очистку…</p></div>}><PhotoClean /></Suspense> : <>
 
       <section className="controls">
         {bootError && <p className="banner">{bootError}</p>}
@@ -125,7 +126,7 @@ export default function App() {
           onMax={setMaxPrice}
         />
         <div className="actions">
-          <button type="button" className="primary" onClick={() => void load(true)} disabled={loading}>
+          <button type="button" className="primary" onClick={() => void load()} disabled={loading}>
             {loading ? 'Ищем товары…' : 'Найти товары'}
           </button>
           <p className="hint">Запрос к Grailed выполняется только после нажатия кнопки.</p>

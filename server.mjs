@@ -9,6 +9,15 @@ const token = process.env.BOT_TOKEN || ''
 const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET || ''
 const publicUrl = (process.env.PUBLIC_URL || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '')).replace(/\/$/, '')
 const dist = join(process.cwd(), 'dist')
+const APP_ID = 'MNRWEFSS2Q'
+const SEARCH_KEY = 'c89dbaddf15fe70e1941a109bf7c2a3d'
+const PATHS = {
+  sneakers: ['footwear.hitop_sneakers', 'footwear.lowtop_sneakers'], down_jackets: ['outerwear.parkas', 'outerwear.heavy_coats', 'outerwear.light_jackets'],
+  tshirts: ['tops.short_sleeve_shirts', 'tops.long_sleeve_shirts'], bags: ['accessories.bags_luggage'], hoodies: ['tops.sweatshirts_hoodies'], sweatshirts: ['tops.sweatshirts_hoodies'],
+  pants: ['bottoms.casual_pants', 'bottoms.sweatpants_joggers', 'bottoms.cropped_pants'], jeans: ['bottoms.denim'], hats: ['accessories.hats'], watches: ['accessories.jewelry_watches'], jewelry: ['accessories.jewelry_watches'],
+}
+const QUERIES = { down_jackets: 'puffer', sweatshirts: 'sweatshirt' }
+const trendsCache = new Map()
 
 const mime = {
   '.css': 'text/css; charset=utf-8', '.html': 'text/html; charset=utf-8', '.ico': 'image/x-icon',
@@ -43,6 +52,106 @@ async function handleUpdate(update) {
 function json(response, status, value) {
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
   response.end(JSON.stringify(value))
+}
+
+function previewUrl(value, width) {
+  if (!value) return null
+  try { const url = new URL(String(value)); url.searchParams.set('w', String(width)); return url.toString() } catch { return String(value) }
+}
+
+function trendWindow(type, season, date) {
+  const end = new Date(), start = new Date(end)
+  const days = { days_7: 7, days_30: 30, days_90: 90 }
+  if (type === 'current') start.setHours(0, 0, 0, 0)
+  else if (days[type]) start.setDate(start.getDate() - days[type])
+  else if (type === 'custom_date' && date) {
+    const [year, month, day] = date.split('-').map(Number)
+    start.setTime(new Date(year, month - 1, day, 0, 0, 0, 0).getTime())
+    end.setTime(new Date(year, month - 1, day, 23, 59, 59, 999).getTime())
+  } else if (type === 'season') {
+    const month = { spring: 2, summer: 5, autumn: 8, winter: 11 }[season || 'winter']
+    let year = end.getFullYear(), candidate = new Date(year, month, 1)
+    if (candidate > end) candidate = new Date(--year, month, 1)
+    start.setTime(candidate.getTime())
+    const seasonEnd = new Date(year, month + 3, 0, 23, 59, 59, 999)
+    if (seasonEnd < end) end.setTime(seasonEnd.getTime())
+  }
+  return [Math.floor(start.getTime() / 1000), Math.floor(end.getTime() / 1000)]
+}
+
+function categoryHitMatches(category, hit) {
+  const text = `${hit.title || ''} ${Array.isArray(hit.designer_names) ? hit.designer_names.join(' ') : hit.designer_names || ''}`.toLowerCase()
+  if (category === 'down_jackets') return /\b(puffer|down|nuptse|maya|expedition|parka)\b/.test(text)
+  if (category === 'hoodies') return /\b(hoodie|hooded|zip[- ]?up)\b/.test(text)
+  if (category === 'sweatshirts') return /\b(sweatshirt|crewneck|sweater)\b/.test(text)
+  if (category === 'watches') return /\b(watch|rolex|submariner|datejust|santos|g[- ]?shock|casio|seiko|omega)\b/.test(text)
+  if (category === 'jewelry') return /\b(jewelry|necklace|bracelet|ring|pendant|chain|earring|bangle|brooch)\b/.test(text)
+  return true
+}
+
+function keyFor(brand, title) {
+  const blob = `${brand} ${title}`.toLowerCase().replace(/[^a-z0-9\s-]/g, ' ')
+  const patterns = [
+    [/\b(?:air jordan|jordan)\s*(\d+)\b/, m => `jordan|jordan ${m[1]}`], [/\bdunk\s+(low|high)\b/, m => `nike|dunk ${m[1]}`],
+    [/\b(?:air force\s*1|af1|air force)\b/, () => 'nike|air force 1'], [/\bair max\s*(\d+)\b/, m => `nike|air max ${m[1]}`],
+    [/\byeezy\s+(\d+|slide|foam)\b/, m => `yeezy|yeezy ${m[1]}`], [/\bgats?\b/, () => 'maison margiela|gat'],
+    [/\bnuptse\b/, () => 'the north face|nuptse'], [/\bbox logo\b/, () => 'supreme|box logo'],
+    [/\bspeedy\s*(\d+)?\b/, m => `louis vuitton|speedy ${m[1] || ''}`.trim()], [/\bneverfull\b/, () => 'louis vuitton|neverfull'],
+  ]
+  for (const [regex, make] of patterns) { const match = blob.match(regex); if (match) return make(match) }
+  const brandKey = (brand || 'other').split('×')[0].trim().toLowerCase()
+  const stop = new Set(['the','and','for','with','new','mens','men','shirt','tee','shoes','sneakers','jacket','bag','size','vintage'])
+  const words = title.toLowerCase().replace(/[^a-z0-9\s-]/g, ' ').split(/\s+/).filter(word => word.length > 1 && !stop.has(word) && !/^\d{2,4}$/.test(word))
+  return `${brandKey}|${words.slice(0, 2).join(' ')}`
+}
+
+function pretty(key, brand) {
+  const slug = key.split('|')[1] || key
+  return `${brand.split('×')[0].trim()} ${slug.split(' ').map(value => ['gat','sb'].includes(value) ? value.toUpperCase() : (value[0]?.toUpperCase() || '') + value.slice(1)).join(' ')}`.trim()
+}
+
+async function trendQuery(category, page, start, end, min, max) {
+  const numericFilters = [`sold_at_i>=${start}`, `sold_at_i<=${end}`]
+  if (min != null) numericFilters.push(`price>=${min}`)
+  if (max != null) numericFilters.push(`price<=${max}`)
+  const params = new URLSearchParams({ query: QUERIES[category] || '', hitsPerPage: '100', page: String(page), facetFilters: JSON.stringify([PATHS[category].map(path => `category_path:${path}`), 'department:menswear']), numericFilters: JSON.stringify(numericFilters) })
+  const result = await fetch(`https://${APP_ID}-dsn.algolia.net/1/indexes/Listing_sold_production/query`, { method: 'POST', headers: { 'X-Algolia-Application-Id': APP_ID, 'X-Algolia-API-Key': SEARCH_KEY, 'content-type': 'application/json' }, body: JSON.stringify({ params: params.toString() }) })
+  if (!result.ok) throw new Error(`Trend source failed: ${result.status}`)
+  return result.json()
+}
+
+async function trends(requestUrl, response) {
+  const category = requestUrl.searchParams.get('category_id') || 'sneakers'
+  if (!PATHS[category]) return json(response, 400, { ok: false, error: 'Invalid category' })
+  const periodType = requestUrl.searchParams.get('period_type') || 'days_30'
+  const season = requestUrl.searchParams.get('season') || undefined, date = requestUrl.searchParams.get('date') || undefined
+  const minRaw = requestUrl.searchParams.get('min_price'), maxRaw = requestUrl.searchParams.get('max_price')
+  const min = minRaw == null ? undefined : Number(minRaw), max = maxRaw == null ? undefined : Number(maxRaw)
+  const cacheKey = `${category}|${periodType}|${season || ''}|${date || ''}|${min ?? ''}|${max ?? ''}`
+  const cached = trendsCache.get(cacheKey)
+  if (cached && Date.now() - cached.time < 60_000 && requestUrl.searchParams.get('refresh') !== '1') return json(response, 200, { ...cached.value, analysis: { ...cached.value.analysis, from_cache: true } })
+  const [start, end] = trendWindow(periodType, season, date)
+  const first = await trendQuery(category, 0, start, end, min, max)
+  const pageCount = Math.min(first.nbPages || 1, 8)
+  const pages = pageCount > 1 ? await Promise.all(Array.from({ length: pageCount - 1 }, (_, index) => trendQuery(category, index + 1, start, end, min, max))) : []
+  const hits = [...(first.hits || []), ...pages.flatMap(page => page.hits || [])]
+  const groups = new Map()
+  for (const hit of hits) {
+    if (!categoryHitMatches(category, hit)) continue
+    const brand = Array.isArray(hit.designer_names) ? hit.designer_names.join(' × ') : String(hit.designer_names || '')
+    const key = keyFor(brand, String(hit.title || ''))
+    if (!key.split('|')[1]) continue
+    const group = groups.get(key) || { brand, priceTotal: 0, priceCount: 0, sellers: new Set(), image: null, count: 0 }
+    const price = Number(hit.sold_price || hit.price); if (price) { group.priceTotal += price; group.priceCount++ }
+    if (hit.user?.username) group.sellers.add(String(hit.user.username))
+    group.image ||= hit.cover_photo?.url || hit.cover_photo?.image_url; group.count++; groups.set(key, group)
+  }
+  const ranked = [...groups].filter(([, group]) => group.count >= 2).sort((a, b) => b[1].count - a[1].count).slice(0, 10), maxCount = ranked[0]?.[1].count || 1
+  const items = ranked.map(([key, group], index) => ({ rank: index + 1, model_key: key, title: pretty(key, group.brand), brand: group.brand, avg_price: group.priceCount ? group.priceTotal / group.priceCount : 0, sales_last_30d: group.count, seller_count: group.sellers.size, listing_count: group.count, trend_score: group.count / maxCount, grailed_url: `https://www.grailed.com/shop?query=${encodeURIComponent(key.replace('|', ' '))}`, image_url: previewUrl(group.image, 160), status: 'sold' }))
+  const value = { category_id: category, period: { type: periodType, value: new Date(start * 1000).toISOString().slice(0, 10) }, generated_at: new Date().toISOString(), message: items.length ? undefined : 'В выбранном периоде и диапазоне нет повторных продаж моделей.', analysis: { sold_sample: hits.length, models_found: groups.size, ranked_by: min != null || max != null ? 'sales_in_period_and_price_band' : 'sales_in_period', from_cache: false }, items }
+  trendsCache.set(cacheKey, { time: Date.now(), value })
+  if (trendsCache.size > 100) trendsCache.delete(trendsCache.keys().next().value)
+  return json(response, 200, value)
 }
 
 const crcTable = (() => {
@@ -124,6 +233,7 @@ const server = createServer(async (request, response) => {
   try {
     const url = new URL(request.url, 'http://localhost')
     if (request.url === '/health') return json(response, 200, { ok: true, bot: Boolean(token), web_app: Boolean(publicUrl) })
+    if (url.pathname === '/api/trends' && request.method === 'GET') return await trends(url, response)
     const galleryMatch = url.pathname.match(/^\/api\/listings\/(\d+)\/gallery\.zip$/)
     if (galleryMatch && request.method === 'GET') return await galleryZip(request, response, galleryMatch[1])
     if (request.url === '/api/telegram/webhook' && request.method === 'POST') {

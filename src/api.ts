@@ -149,8 +149,7 @@ export async function searchPhotoCandidates(textQuery: string): Promise<PhotoSea
 export async function fetchTrends(params: { category_id: string; period_type: PeriodType; season?: Season; date?: string; min_price?: number; max_price?: number; refresh?: boolean }): Promise<TrendsResponse> {
   const [start, end] = windowFor(params.period_type, params.season, params.date)
   const first = await query(params.category_id, 0, start, end, params.min_price, params.max_price)
-  // Four pages (up to 400 sales) are enough for the top while keeping mobile WebViews responsive.
-  const pageCount = Math.min(first.nbPages || 1, 4)
+  const pageCount = Math.min(first.nbPages || 1, 8)
   const remaining = pageCount > 1 ? await Promise.all(Array.from({ length: pageCount - 1 }, (_, index) => query(params.category_id, index + 1, start, end, params.min_price, params.max_price))) : []
   const hits: any[] = [...(first.hits || []), ...remaining.flatMap(page => page.hits || [])]
   const groups = new Map<string, { brand: string; prices: number[]; sellers: Set<string>; image?: string; count: number }>()

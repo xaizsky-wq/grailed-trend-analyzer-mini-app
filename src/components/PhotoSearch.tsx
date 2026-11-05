@@ -32,7 +32,7 @@ function money(n: number) { return new Intl.NumberFormat('en-US', { style: 'curr
 
 function ListingGrid({ items, empty }: { items: PhotoListing[]; empty: string }) {
   if (!items.length) return <p className="photo-empty">{empty}</p>
-  return <div className="photo-grid">{items.slice(0, 40).map(item => <article className="photo-card" key={`${item.status}-${item.id}`}>
+  return <div className="photo-grid">{items.slice(0, 20).map(item => <article className="photo-card" key={`${item.status}-${item.id}`}>
     <div className="photo-card-image">{item.image_url ? <><a href={item.grailed_url} target="_blank" rel="noreferrer"><img src={item.image_url} alt="" loading="lazy" decoding="async" /></a><button type="button" className="image-download gallery-download" aria-label="Скачать все фото объявления" title={`Скачать все фото${item.photo_count ? ` (${item.photo_count})` : ''} в максимальном качестве`} onClick={() => void downloadListingGallery(item.id, item.title).catch(error => window.alert(error instanceof Error ? error.message : 'Не удалось скачать галерею'))}>ZIP</button></> : <div className="photo-placeholder" />}</div>
     <div className="photo-card-body"><p className="brand">{item.brand || '—'}</p><h4>{item.title}</h4><p><strong>{money(item.price)}</strong>{item.color ? ` · ${item.color}` : ''}</p><a className="photo-card-link" href={item.grailed_url} target="_blank" rel="noreferrer">Лот ↗</a></div>
   </article>)}</div>
@@ -62,6 +62,7 @@ export function PhotoSearch() {
         setStatus('Загружаем бесплатную AI-модель в браузер…')
         const { pipeline, env } = await import('@huggingface/transformers')
         env.allowLocalModels = false
+        if (env.backends?.onnx?.wasm) env.backends.onnx.wasm.numThreads = 1
         classifier = await pipeline('zero-shot-image-classification', 'Xenova/clip-vit-base-patch32', {
           progress_callback: (progress: { status?: string; progress?: number }) => {
             if (progress.status === 'progress' && typeof progress.progress === 'number') setStatus(`Загружаем AI-модель… ${Math.round(progress.progress)}%`)

@@ -14,11 +14,10 @@ export async function downloadImage(url: string, filename: string) {
 }
 
 export async function downloadListingGallery(id: string, title: string) {
-  const safeName = title.replace(/[^a-zA-Z0-9а-яА-ЯёЁ._-]+/g, '-').replace(/-+/g, '-').slice(0, 70) || `listing-${id}`
-  const response = await fetch(`/api/listings/${encodeURIComponent(id)}/gallery.zip`)
-  if (!response.ok) throw new Error('Не удалось собрать ZIP. Повторите ещё раз.')
-  const blob = await response.blob(), objectUrl = URL.createObjectURL(blob)
-  const anchor = document.createElement('a'); anchor.href = objectUrl; anchor.download = `${safeName}-all-photos.zip`; document.body.appendChild(anchor); anchor.click(); anchor.remove()
-  setTimeout(() => URL.revokeObjectURL(objectUrl), 10_000)
+  void title
+  const url = new URL(`/api/listings/${encodeURIComponent(id)}/gallery.zip`, window.location.origin).toString()
+  openExternalUrl(url)
   return true
 }
+import { openExternalUrl } from './telegram'
+

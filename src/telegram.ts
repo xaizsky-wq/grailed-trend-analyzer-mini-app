@@ -18,7 +18,14 @@ type TelegramWebApp = {
   disableVerticalSwipes?(): void
   setHeaderColor?(color: string): void
   setBackgroundColor?(color: string): void
+  openLink?(url: string, options?: { try_instant_view?: boolean }): void
   HapticFeedback?: { impactOccurred(style: 'light' | 'medium' | 'heavy'): void }
+}
+
+export function openExternalUrl(url: string) {
+  const app = window.Telegram?.WebApp
+  if (app?.openLink) { app.openLink(url, { try_instant_view: false }); return }
+  window.open(url, '_blank', 'noopener,noreferrer')
 }
 
 declare global {

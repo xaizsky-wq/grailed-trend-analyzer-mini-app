@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { fetchModelItems } from '../api'
 import type { PeriodType, Season, SoldListing, TrendItem, TrendsResponse } from '../api'
 import { downloadListingGallery } from '../downloadImage'
+import { SmartImage } from './SmartImage'
 
 type QueryContext = {
   category_id: string
@@ -123,7 +124,7 @@ export function TopList({ items, loading, error, message, stale, analysis, query
               <article className="row">
                 <span className="rank">{String(item.rank).padStart(2, '0')}</span>
                 {item.image_url ? (
-                  <img src={item.image_url} alt="" className="thumb" loading="lazy" decoding="async" />
+                  <SmartImage src={item.image_url} className="thumb" />
                 ) : (
                   <div className="thumb placeholder" />
                 )}
@@ -168,7 +169,7 @@ export function TopList({ items, loading, error, message, stale, analysis, query
                       <ul className="sold-items">
                         {listings.map((row) => (
                           <li key={row.id} className="sold-item">
-                            <div className="sold-thumb-wrap">{row.image_url ? <><img src={row.image_url} alt="" className="thumb small" loading="lazy" decoding="async" /><button type="button" className="image-download gallery-download" aria-label="Скачать все фото объявления" title={`Скачать все фото${row.photo_count ? ` (${row.photo_count})` : ''} в максимальном качестве`} onClick={() => void downloadListingGallery(row.id, row.title).catch(error => window.alert(error instanceof Error ? error.message : 'Не удалось скачать галерею'))}>ZIP</button></> : <div className="thumb small placeholder" />}</div>
+                            <div className="sold-thumb-wrap">{row.image_url ? <><SmartImage src={row.image_url} className="thumb small" /><button type="button" className="image-download gallery-download" aria-label="Скачать все фото объявления" title={`Скачать все фото${row.photo_count ? ` (${row.photo_count})` : ''} в максимальном качестве`} onClick={() => void downloadListingGallery(row.id, row.title).catch(error => window.alert(error instanceof Error ? error.message : 'Не удалось скачать галерею'))}>ZIP</button></> : <div className="thumb small placeholder" />}</div>
                             <div className="sold-item-meta">
                               <p className="sold-item-title">{row.title}</p>
                               <p className="sold-item-sub">

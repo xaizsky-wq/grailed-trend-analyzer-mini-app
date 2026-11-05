@@ -6,6 +6,17 @@ type Match = { query: string; score: number }
 type ClassifierResult = { label: string; score: number }
 type ImageClassifier = ((image: string, labels: string[]) => Promise<ClassifierResult[]>) & { dispose?: () => void | Promise<void> }
 
+async function makeThumbnail(file: File) {
+  const url = URL.createObjectURL(file)
+  try {
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => { const element = new Image(); element.onload = () => resolve(element); element.onerror = reject; element.src = url })
+    const max = 160, scale = Math.min(1, max / Math.max(image.naturalWidth, image.naturalHeight))
+    const canvas = document.createElement('canvas'); canvas.width = Math.max(1, Math.round(image.naturalWidth * scale)); canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
+    canvas.getContext('2d', { alpha: false })?.drawImage(image, 0, 0, canvas.width, canvas.height)
+    return canvas.toDataURL('image/jpeg', .68)
+  } finally { URL.revokeObjectURL(url) }
+}
+
 const PRODUCTS = [
   'Nike Air Force 1 sneakers', 'Nike Dunk Low sneakers', 'Nike Dunk High sneakers', 'Nike Air Max 95 sneakers', 'Nike Air Max 97 sneakers',
   'Nike Air Jordan 1 sneakers', 'Nike Air Jordan 3 sneakers', 'Nike Air Jordan 4 sneakers', 'Nike Air Jordan 5 sneakers', 'Nike Air Jordan 11 sneakers',
@@ -48,8 +59,9 @@ export function PhotoSearch() {
   const resultsRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
-    const urls = files.map(file => URL.createObjectURL(file)); setPreviews(urls)
-    return () => urls.forEach(url => URL.revokeObjectURL(url))
+    let cancelled = false
+    void Promise.all(files.map(makeThumbnail)).then(urls => { if (!cancelled) setPreviews(urls) }).catch(() => { if (!cancelled) setPreviews([]) })
+    return () => { cancelled = true }
   }, [files])
 
   async function search() {

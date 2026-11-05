@@ -27,6 +27,12 @@ const QUERIES: Record<string, string> = { down_jackets: 'puffer', sweatshirts: '
 const APP_ID = 'MNRWEFSS2Q'
 const SEARCH_KEY = 'c89dbaddf15fe70e1941a109bf7c2a3d'
 
+function previewUrl(value: unknown, width: number) {
+  if (!value) return null
+  try { const url = new URL(String(value)); url.searchParams.set('w', String(width)); return url.toString() }
+  catch { return String(value) }
+}
+
 export async function fetchCategories() { return CATEGORIES }
 
 function windowFor(type: PeriodType, season?: Season, date?: string) {
@@ -124,7 +130,7 @@ function toPhotoListing(hit: any, status: 'active' | 'sold'): PhotoListing {
     price: Number(status === 'sold' ? (hit.sold_price || hit.price || 0) : (hit.price || 0)),
     status,
     grailed_url: `https://www.grailed.com/listings/${id}`,
-    image_url: image ? `${image}${String(image).includes('?') ? '' : '?w=360'}` : null,
+    image_url: previewUrl(image, 220),
     color: hit.color || hit.color_name || hit.colorway || null,
     sold_at: soldUnix ? new Date(soldUnix * 1000).toISOString() : null,
     photo_count: Number(hit.photo_count || 0),
@@ -164,7 +170,7 @@ export async function fetchTrends(params: { category_id: string; period_type: Pe
   }
   const ranked = [...groups].filter(([, group]) => group.count >= 2).sort((a,b) => b[1].count - a[1].count).slice(0,10)
   const maxCount = ranked[0]?.[1].count || 1
-  const items = ranked.map(([key,group], index): TrendItem => ({ rank: index+1, model_key: key, title: pretty(key,group.brand), brand: group.brand, avg_price: group.prices.length ? group.prices.reduce((a,b)=>a+b,0)/group.prices.length : 0, sales_last_30d: group.count, seller_count: group.sellers.size, listing_count: group.count, trend_score: group.count/maxCount, grailed_url: `https://www.grailed.com/shop?query=${encodeURIComponent(key.replace('|',' '))}`, image_url: group.image ? `${group.image}${group.image.includes('?') ? '' : '?w=400'}` : null, status: 'sold' }))
+  const items = ranked.map(([key,group], index): TrendItem => ({ rank: index+1, model_key: key, title: pretty(key,group.brand), brand: group.brand, avg_price: group.prices.length ? group.prices.reduce((a,b)=>a+b,0)/group.prices.length : 0, sales_last_30d: group.count, seller_count: group.sellers.size, listing_count: group.count, trend_score: group.count/maxCount, grailed_url: `https://www.grailed.com/shop?query=${encodeURIComponent(key.replace('|',' '))}`, image_url: previewUrl(group.image, 160), status: 'sold' }))
   return { category_id: params.category_id, period: { type: params.period_type, value: new Date(start*1000).toISOString().slice(0,10) }, generated_at: new Date().toISOString(), message: items.length ? undefined : 'В выбранном периоде и диапазоне нет повторных продаж моделей.', analysis: { sold_sample: hits.length, models_found: groups.size, ranked_by: params.min_price != null || params.max_price != null ? 'sales_in_period_and_price_band' : 'sales_in_period', from_cache: false }, items }
 }
 
@@ -184,7 +190,7 @@ export async function fetchModelItems(params: { category_id: string; model_key: 
     const id = String(hit.id || hit.objectID || '')
     const soldUnix = Number(hit.sold_at_i || hit.sold_at || 0)
     const image = hit.cover_photo?.url || hit.cover_photo?.image_url || null
-    return { id, title: String(hit.title || 'Без названия'), color: hit.color || hit.color_name || hit.colorway || null, price: Number(hit.sold_price || hit.price || 0), seller: hit.user?.username ? String(hit.user.username) : null, sold_at: soldUnix ? new Date(soldUnix * 1000).toISOString() : null, grailed_url: `https://www.grailed.com/listings/${id}`, image_url: image ? `${image}${String(image).includes('?') ? '' : '?w=240'}` : null, photo_count: Number(hit.photo_count || 0) }
+    return { id, title: String(hit.title || 'Без названия'), color: hit.color || hit.color_name || hit.colorway || null, price: Number(hit.sold_price || hit.price || 0), seller: hit.user?.username ? String(hit.user.username) : null, sold_at: soldUnix ? new Date(soldUnix * 1000).toISOString() : null, grailed_url: `https://www.grailed.com/listings/${id}`, image_url: previewUrl(image, 120), photo_count: Number(hit.photo_count || 0) }
   })
   return { category_id: params.category_id, model_key: params.model_key, total_sold: matching.length, returned: items.length, items }
 }

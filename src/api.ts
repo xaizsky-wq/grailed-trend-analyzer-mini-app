@@ -2,10 +2,10 @@ export type Category = { id: string; name: string }
 export type PeriodType = 'current' | 'days_7' | 'days_30' | 'days_90' | 'season' | 'custom_date'
 export type Season = 'spring' | 'summer' | 'autumn' | 'winter'
 export type TrendItem = { rank: number; model_key: string; title: string; brand: string; avg_price: number; sales_last_30d: number; seller_count?: number; listing_count?: number; trend_score: number; grailed_url: string; image_url?: string | null; status?: string; favorites?: number }
-export type SoldListing = { id: string; title: string; color: string | null; price: number; seller: string | null; sold_at: string | null; grailed_url: string; image_url?: string | null }
+export type SoldListing = { id: string; title: string; color: string | null; price: number; seller: string | null; sold_at: string | null; grailed_url: string; image_url?: string | null; photo_count?: number }
 export type ModelItemsResponse = { category_id: string; model_key: string; total_sold: number; returned: number; items: SoldListing[] }
 export type TrendsResponse = { category_id: string; period: { type: string; value: string }; generated_at: string; stale?: boolean; message?: string; analysis?: { sold_sample: number; models_found: number; ranked_by: string; from_cache?: boolean }; items: TrendItem[] }
-export type PhotoListing = { id: string; title: string; brand: string; price: number; status: 'active' | 'sold'; grailed_url: string; image_url: string | null; color: string | null; sold_at: string | null }
+export type PhotoListing = { id: string; title: string; brand: string; price: number; status: 'active' | 'sold'; grailed_url: string; image_url: string | null; color: string | null; sold_at: string | null; photo_count?: number }
 export type PhotoSearchResponse = { activeTotal: number; soldTotal: number; active: PhotoListing[]; sold: PhotoListing[]; query: string }
 
 const CATEGORIES: Category[] = [
@@ -110,6 +110,7 @@ function toPhotoListing(hit: any, status: 'active' | 'sold'): PhotoListing {
     image_url: image ? `${image}${String(image).includes('?') ? '' : '?w=360'}` : null,
     color: hit.color || hit.color_name || hit.colorway || null,
     sold_at: soldUnix ? new Date(soldUnix * 1000).toISOString() : null,
+    photo_count: Number(hit.photo_count || 0),
   }
 }
 
@@ -162,7 +163,7 @@ export async function fetchModelItems(params: { category_id: string; model_key: 
     const id = String(hit.id || hit.objectID || '')
     const soldUnix = Number(hit.sold_at_i || hit.sold_at || 0)
     const image = hit.cover_photo?.url || hit.cover_photo?.image_url || null
-    return { id, title: String(hit.title || 'Без названия'), color: hit.color || hit.color_name || hit.colorway || null, price: Number(hit.sold_price || hit.price || 0), seller: hit.user?.username ? String(hit.user.username) : null, sold_at: soldUnix ? new Date(soldUnix * 1000).toISOString() : null, grailed_url: `https://www.grailed.com/listings/${id}`, image_url: image ? `${image}${String(image).includes('?') ? '' : '?w=240'}` : null }
+    return { id, title: String(hit.title || 'Без названия'), color: hit.color || hit.color_name || hit.colorway || null, price: Number(hit.sold_price || hit.price || 0), seller: hit.user?.username ? String(hit.user.username) : null, sold_at: soldUnix ? new Date(soldUnix * 1000).toISOString() : null, grailed_url: `https://www.grailed.com/listings/${id}`, image_url: image ? `${image}${String(image).includes('?') ? '' : '?w=240'}` : null, photo_count: Number(hit.photo_count || 0) }
   })
   return { category_id: params.category_id, model_key: params.model_key, total_sold: matching.length, returned: items.length, items }
 }

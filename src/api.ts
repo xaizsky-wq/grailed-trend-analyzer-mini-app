@@ -148,8 +148,10 @@ export async function searchPhotoCandidates(textQuery: string): Promise<PhotoSea
 
 export async function fetchTrends(params: { category_id: string; period_type: PeriodType; season?: Season; date?: string; min_price?: number; max_price?: number; refresh?: boolean }): Promise<TrendsResponse> {
   const [start, end] = windowFor(params.period_type, params.season, params.date)
-  const hits: any[] = []
-  for (let page = 0; page < 8; page++) { const data = await query(params.category_id, page, start, end, params.min_price, params.max_price); hits.push(...(data.hits || [])); if (page + 1 >= data.nbPages) break }
+  const first = await query(params.category_id, 0, start, end, params.min_price, params.max_price)
+  const pageCount = Math.min(first.nbPages || 1, 8)
+  const remaining = pageCount > 1 ? await Promise.all(Array.from({ length: pageCount - 1 }, (_, index) => query(params.category_id, index + 1, start, end, params.min_price, params.max_price))) : []
+  const hits: any[] = [...(first.hits || []), ...remaining.flatMap(page => page.hits || [])]
   const groups = new Map<string, { brand: string; prices: number[]; sellers: Set<string>; image?: string; count: number }>()
   for (const hit of hits) {
     if (!categoryHitMatches(params.category_id, hit)) continue

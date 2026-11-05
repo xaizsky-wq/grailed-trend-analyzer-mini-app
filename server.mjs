@@ -2,6 +2,7 @@ import { createReadStream, existsSync } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { extname, join, normalize } from 'node:path'
+import { createGzip } from 'node:zlib'
 
 const port = Number(process.env.PORT || 8080)
 const token = process.env.BOT_TOKEN || ''
@@ -107,8 +108,16 @@ async function serveStatic(request, response) {
   if (!file.startsWith(dist)) return json(response, 403, { ok: false })
   try { if (!(await stat(file)).isFile()) file = join(dist, 'index.html') } catch { file = join(dist, 'index.html') }
   if (!existsSync(file)) return json(response, 503, { ok: false, error: 'Build output is missing' })
-  response.writeHead(200, { 'content-type': mime[extname(file)] || 'application/octet-stream', 'cache-control': extname(file) === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable' })
-  createReadStream(file).pipe(response)
+  const extension = extname(file)
+  const headers = { 'content-type': mime[extension] || 'application/octet-stream', 'cache-control': extension === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable' }
+  const compress = /\bgzip\b/.test(request.headers['accept-encoding'] || '') && ['.css', '.html', '.js', '.json', '.svg'].includes(extension)
+  if (compress) {
+    response.writeHead(200, { ...headers, 'content-encoding': 'gzip', vary: 'Accept-Encoding' })
+    createReadStream(file).pipe(createGzip({ level: 6 })).pipe(response)
+  } else {
+    response.writeHead(200, headers)
+    createReadStream(file).pipe(response)
+  }
 }
 
 const server = createServer(async (request, response) => {

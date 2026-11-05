@@ -3,6 +3,7 @@ import { useEffect, useRef, useState, type PointerEvent } from 'react'
 type Area = { x: number; y: number; w: number; h: number }
 type Point = { x: number; y: number }
 type Sensitivity = 'precise' | 'balanced' | 'weak'
+type WorkItem = { id: string; file: File; area: Area; result: string | null }
 const emptyArea: Area = { x: 0, y: 0, w: 0, h: 0 }
 
 function contentAwareFill(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, smartMask: boolean, sensitivity: Sensitivity) {
@@ -118,16 +119,19 @@ function contentAwareFill(ctx: CanvasRenderingContext2D, x: number, y: number, w
 }
 
 export function PhotoUnique() {
-  const [file, setFile] = useState<File | null>(null)
+  const [items, setItems] = useState<WorkItem[]>([])
+  const [activeIndex, setActiveIndex] = useState(0)
   const [preview, setPreview] = useState<string | null>(null)
-  const [result, setResult] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
-  const [area, setArea] = useState<Area>(emptyArea)
   const [smartMask, setSmartMask] = useState(true)
   const [sensitivity, setSensitivity] = useState<Sensitivity>('balanced')
   const [dragStart, setDragStart] = useState<Point | null>(null)
   const imageRef = useRef<HTMLImageElement>(null)
+  const active = items[activeIndex]
+  const file = active?.file ?? null
+  const area = active?.area ?? emptyArea
+  const result = active?.result ?? null
 
   useEffect(() => {
     if (!file) { setPreview(null); return }
@@ -135,9 +139,35 @@ export function PhotoUnique() {
     return () => URL.revokeObjectURL(url)
   }, [file])
 
-  function choose(next: File | null) {
-    if (result) URL.revokeObjectURL(result)
-    setFile(next); setArea(emptyArea); setResult(null); setMessage('')
+  function patchActive(patch: Partial<Pick<WorkItem, 'area' | 'result'>>) {
+    setItems(current => current.map((item, index) => index === activeIndex ? { ...item, ...patch } : item))
+  }
+
+  function setArea(next: Area) { patchActive({ area: next }) }
+
+  function setResult(next: string | null) {
+    if (result && result !== next) URL.revokeObjectURL(result)
+    patchActive({ result: next })
+  }
+
+  function addFiles(selected: FileList | null) {
+    if (!selected) return
+    const incoming = Array.from(selected).filter(file => file.type.startsWith('image/'))
+    if (!incoming.length) return
+    setItems(current => {
+      const next = [...current, ...incoming.map((file, index) => ({ id: `${file.name}-${file.lastModified}-${file.size}-${index}-${Date.now()}`, file, area: emptyArea, result: null }))].slice(0, 10)
+      if (!current.length) setActiveIndex(0)
+      return next
+    })
+    setMessage('Выберите фото в очереди и обведите водяной знак.')
+  }
+
+  function removeItem(index: number) {
+    const removed = items[index]
+    if (removed?.result) URL.revokeObjectURL(removed.result)
+    setItems(current => current.filter((_, itemIndex) => itemIndex !== index))
+    setActiveIndex(current => Math.max(0, Math.min(current > index ? current - 1 : current, items.length - 2)))
+    setMessage('')
   }
 
   function imagePoint(event: PointerEvent<HTMLDivElement>): Point {
@@ -214,14 +244,18 @@ export function PhotoUnique() {
   const style = image && area.w > 0 ? { left: `${area.x / image.naturalWidth * 100}%`, top: `${area.y / image.naturalHeight * 100}%`, width: `${area.w / image.naturalWidth * 100}%`, height: `${area.h / image.naturalHeight * 100}%` } : undefined
 
   return <section className="photo-search unique-tool">
-    <div className="photo-heading"><div><p className="eyebrow">REMOVER · LOCAL</p><h2>Remover</h2></div><p>Загрузите своё изображение, обведите водяной знак мышью и скачайте очищенную копию. Фото остаётся в браузере.</p></div>
-    {!preview ? <label className="dropzone remover-upload"><span className="drop-icon">＋</span><strong>Выбрать фото</strong><small>JPG, PNG или WEBP</small><input type="file" accept="image/jpeg,image/png,image/webp" onChange={e => choose(e.target.files?.[0] || null)} /></label> : <>
+    <div className="photo-heading"><div><p className="eyebrow">REMOVER · BATCH · LOCAL</p><h2>Remover</h2></div><p>Загрузите до 10 изображений, по очереди обведите водяной знак на каждом и скачайте очищенные копии. Фото остаются в браузере.</p></div>
+    {!preview ? <label className="dropzone remover-upload"><span className="drop-icon">＋</span><strong>Выбрать несколько фото</strong><small>До 10 файлов · JPG, PNG или WEBP</small><input multiple type="file" accept="image/jpeg,image/png,image/webp" onChange={e => { addFiles(e.target.files); e.target.value = '' }} /></label> : <>
+      <div className="upload-queue remover-queue">{items.map((item, index) => <div className={index === activeIndex ? 'upload-item active' : 'upload-item'} key={item.id}>
+        <button className="remover-queue-select" type="button" onClick={() => { setActiveIndex(index); setMessage(item.result ? 'Фото обработано. Можно скачать результат или нарисовать рамку заново.' : 'Обведите водяной знак мышью или попробуйте автоопределение.') }}><span>{index + 1}</span><strong>{item.file.name}</strong>{item.result && <small>Готово</small>}</button>
+        <button type="button" aria-label={`Удалить ${item.file.name}`} onClick={() => removeItem(index)}>×</button>
+      </div>)}</div>
       <div className="remover-workspace" onPointerDown={beginSelection} onPointerMove={moveSelection} onPointerUp={endSelection} onPointerCancel={endSelection}>
         <img ref={imageRef} src={preview} alt="Фото для обработки" draggable={false} onLoad={() => setMessage('Обведите водяной знак мышью или попробуйте автоопределение.')} />
         {style && <div className="remover-selection" style={style}><span>{area.w} × {area.h}</span></div>}
       </div>
       <div className="remover-actions">
-        <label className="chip replace-photo">Другое фото<input type="file" accept="image/jpeg,image/png,image/webp" onChange={e => choose(e.target.files?.[0] || null)} /></label>
+        <label className="chip replace-photo">Добавить фото<input multiple type="file" accept="image/jpeg,image/png,image/webp" onChange={e => { addFiles(e.target.files); e.target.value = '' }} /></label>
         <button className="chip" type="button" onClick={autoDetect}>Найти автоматически</button>
         <button className="chip" type="button" onClick={() => { setArea(emptyArea); setResult(null); setMessage('Обведите водяной знак мышью.') }}>Сбросить рамку</button>
         <button className="primary" type="button" onClick={() => void process()} disabled={busy || area.w < 3 || area.h < 3}>{busy ? 'Обработка…' : 'Удалить с заполнением'}</button>

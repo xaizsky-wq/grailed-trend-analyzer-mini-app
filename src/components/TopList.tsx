@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { fetchModelItems } from '../api'
 import type { PeriodType, Season, SoldListing, TrendItem, TrendsResponse } from '../api'
+import { downloadImage } from '../downloadImage'
 
 type QueryContext = {
   category_id: string
@@ -167,11 +168,7 @@ export function TopList({ items, loading, error, message, stale, analysis, query
                       <ul className="sold-items">
                         {listings.map((row) => (
                           <li key={row.id} className="sold-item">
-                            {row.image_url ? (
-                              <img src={row.image_url} alt="" className="thumb small" />
-                            ) : (
-                              <div className="thumb small placeholder" />
-                            )}
+                            <div className="sold-thumb-wrap">{row.image_url ? <><img src={row.image_url} alt="" className="thumb small" /><button type="button" className="image-download" aria-label="Скачать фото объявления" title="Скачать фото" onClick={() => void downloadImage(row.image_url!, row.title)}>↓</button></> : <div className="thumb small placeholder" />}</div>
                             <div className="sold-item-meta">
                               <p className="sold-item-title">{row.title}</p>
                               <p className="sold-item-sub">

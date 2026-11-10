@@ -112,3 +112,31 @@ html,body,#root{background-color:#edf4fb;background-image:radial-gradient(circle
 [data-telegram=true] .row,[data-telegram=true] .photo-card,[data-telegram=true] .sold-item{content-visibility:auto;contain:layout paint style;contain-intrinsic-size:auto 130px}
 .results-sentinel{height:48px;display:grid;place-items:center;color:#60778d;font-size:.75rem;font-weight:800}.results-sentinel span{padding:5px 10px;border:1px solid #b8ccdd;border-radius:9px;background:rgba(255,255,255,.65)}
 @media(max-width:720px){[data-telegram=true] .mast,[data-telegram=true] .control-block,[data-telegram=true] .row,[data-telegram=true] .photo-card,[data-telegram=true] .sold-panel,[data-telegram=true] .sold-item,[data-telegram=true] .photo-heading{box-shadow:0 4px 12px rgba(38,55,73,.14)}[data-telegram=true] .view-tab:hover,[data-telegram=true] .chip:hover,[data-telegram=true] .primary:hover,[data-telegram=true] .open-toggle:hover,[data-telegram=true] .batch-tab:hover,[data-telegram=true] .row:hover,[data-telegram=true] .photo-card:hover{transform:none}}
+@media(max-width:560px){
+  [data-telegram=true],[data-telegram=true] body,[data-telegram=true] #root{background-image:linear-gradient(180deg,#edf4fb,#e5eef7)}
+  [data-telegram=true] .shell{padding:8px 8px calc(48px + var(--tg-safe-area-inset-bottom,0px) + var(--tg-content-safe-area-inset-bottom,0px))}
+  [data-telegram=true] .mast{padding:18px 16px;border-radius:16px;box-shadow:0 3px 8px rgba(38,55,73,.12)}
+  [data-telegram=true] .mast:after{right:10px;top:10px;padding:5px 8px;font-size:.45rem}
+  [data-telegram=true] .mast h1{max-width:270px;margin-top:22px;font-size:2.15rem;line-height:.92}
+  [data-telegram=true] .mast .eyebrow{font-size:.58rem;letter-spacing:.11em}
+  [data-telegram=true] .lede{font-size:.79rem;line-height:1.42}
+  [data-telegram=true] .telegram-profile{margin-top:8px;padding:10px 12px;border-radius:14px}
+  [data-telegram=true] .telegram-user{gap:9px}
+  [data-telegram=true] .telegram-user img,[data-telegram=true] .telegram-avatar{width:38px;height:38px}
+  [data-telegram=true] .telegram-user strong{font-size:.9rem}
+  [data-telegram=true] .telegram-user small{max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  [data-telegram=true] .telegram-state{padding:4px 7px;font-size:.58rem}
+  [data-telegram=true] .view-tabs{position:sticky;top:var(--tg-content-safe-area-inset-top,0px);z-index:20;gap:5px;padding:8px 0;background:rgba(237,244,251,.94)}
+  [data-telegram=true] .view-tab{min-height:40px;padding:7px 5px;border-radius:10px;font-size:.58rem;box-shadow:0 3px 7px rgba(52,79,108,.12)}
+  [data-telegram=true] .controls{gap:9px;padding-top:9px}
+  [data-telegram=true] .control-block{gap:7px;padding:12px;border-radius:14px;box-shadow:0 3px 8px rgba(38,55,73,.1)}
+  [data-telegram=true] .period-block{padding-top:12px}
+  [data-telegram=true] .picker,[data-telegram=true] .price-row{gap:6px}
+  [data-telegram=true] .chip,[data-telegram=true] .primary,[data-telegram=true] input,[data-telegram=true] .open-toggle{padding:7px 9px;border-radius:9px;font-size:.8rem;box-shadow:0 3px 7px rgba(49,71,96,.12)}
+  [data-telegram=true] .chip.time{min-width:calc(50% - 3px)}
+  [data-telegram=true] .field-help,[data-telegram=true] .hint,[data-telegram=true] .analysis{font-size:.75rem}
+  [data-telegram=true] .row{margin-bottom:8px;padding:11px;border-radius:13px!important;gap:9px;box-shadow:0 3px 8px rgba(38,55,73,.12)}
+  [data-telegram=true] .meta h3{font-size:.95rem}
+  [data-telegram=true] .stats{font-size:.74rem}
+  [data-telegram=true] .score{padding-left:0}
+}

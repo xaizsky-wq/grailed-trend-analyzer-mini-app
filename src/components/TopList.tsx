@@ -173,6 +173,7 @@ export function TopList({ items, loading, error, message, stale, analysis, query
                             <div className="sold-item-meta">
                               <p className="sold-item-title">{row.title}</p>
                               <p className="sold-item-sub">
+                                {row.size && <span className="size-chip">Размер {row.size}</span>}
                                 {row.color && <span className="color-chip">{row.color}</span>}
                                 <span>{money(row.price)}</span>
                                 {row.seller && <span>@{row.seller}</span>}

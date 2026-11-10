@@ -42,13 +42,27 @@ function barcodeBits(value: string) {
   return (bits + '110101').slice(0, 118)
 }
 
-function makeSvg(data: EditorData) {
+function makeSvg(data: EditorData, customTemplate?: string | null) {
   const price = Math.max(0, Number(data.price) || 0)
   const taxRate = Math.max(0, Number(data.tax) || 0)
   const tax = price * taxRate / (100 + taxRate)
   const bars = barcodeBits(data.reference)
   const barWidth = 380 / bars.length
   const barRects = [...bars].map((bit, index) => bit === '1' ? `<rect x="${90 + index * barWidth}" y="612" width="${Math.max(1, barWidth * .82)}" height="82"/>` : '').join('')
+  if (customTemplate) {
+    const compactBars = [...bars].map((bit, index) => bit === '1' ? `<rect x="${90 + index * barWidth}" y="688" width="${Math.max(1, barWidth * .82)}" height="42"/>` : '').join('')
+    return `<svg xmlns="http://www.w3.org/2000/svg" width="560" height="820" viewBox="0 0 560 820" role="img" aria-label="Демонстрационный документ ${escapeXml(data.item)}">
+    <rect width="560" height="820" fill="#f8f7f2"/><image href="${escapeXml(customTemplate)}" x="24" y="24" width="512" height="402" preserveAspectRatio="xMidYMid meet"/>
+    <rect x="24" y="426" width="512" height="370" fill="#f8f7f2"/><rect x="24" y="24" width="512" height="772" rx="4" fill="none" stroke="#171717" stroke-width="2"/>
+    <style>text{font-family:Arial,Helvetica,sans-serif;fill:#171717}.muted{fill:#626262}.mono{font-family:monospace}.caps{font-weight:700;letter-spacing:2px}.line{stroke:#171717;stroke-width:1}</style>
+    <text x="52" y="460" font-size="10" class="caps muted">${escapeXml(data.studio)} · DIGITAL PRODUCT RECORD</text><text x="508" y="460" text-anchor="end" font-size="10" class="mono">${escapeXml(data.reference)}</text>
+    <text x="52" y="500" font-size="25" font-weight="700">${escapeXml(data.project)}</text><text x="52" y="532" font-size="16" font-weight="700">${escapeXml(data.item)}</text>
+    <text x="52" y="558" font-size="11" class="mono muted">SKU ${escapeXml(data.sku)} · SIZE ${escapeXml(data.size)} · ${escapeXml(data.color)}</text><line x1="52" x2="508" y1="578" y2="578" class="line"/>
+    <text x="52" y="608" font-size="11" class="muted">DATE ${escapeXml(data.date)} · TAX ${taxRate.toFixed(1)}%</text><text x="508" y="612" font-size="24" font-weight="700" text-anchor="end">${price.toFixed(2)} ${escapeXml(data.currency)}</text>
+    <text x="508" y="638" font-size="11" class="muted" text-anchor="end">included tax ${tax.toFixed(2)} ${escapeXml(data.currency)}</text><g fill="#171717">${compactBars}</g>
+    <text x="280" y="748" text-anchor="middle" font-size="10" class="mono">${escapeXml(data.reference)}</text><text x="280" y="776" text-anchor="middle" font-size="10" font-weight="700" letter-spacing="1.2">DEMO · NOT A RECEIPT · SAMPLE</text>
+    <g transform="rotate(-31 280 380)" opacity=".13"><text x="280" y="400" text-anchor="middle" font-size="72" font-weight="900">SAMPLE</text></g></svg>`
+  }
   return `<svg xmlns="http://www.w3.org/2000/svg" width="560" height="820" viewBox="0 0 560 820" role="img" aria-label="Демонстрационный документ ${escapeXml(data.item)}">
   <rect width="560" height="820" fill="#f8f7f2"/>
   <rect x="24" y="24" width="512" height="772" rx="4" fill="none" stroke="#171717" stroke-width="2"/>
@@ -82,7 +96,9 @@ export function TemplateEditor() {
     catch { return initialData }
   })
   const [saved, setSaved] = useState(false)
-  const svg = useMemo(() => makeSvg(data), [data])
+  const [customTemplate, setCustomTemplate] = useState<{ name: string; dataUrl: string } | null>(null)
+  const [importMessage, setImportMessage] = useState('SVG, PNG, JPG, WEBP или сохранённый проект JSON')
+  const svg = useMemo(() => makeSvg(data, customTemplate?.dataUrl), [data, customTemplate])
   const previewRef = useRef<HTMLDivElement>(null)
 
   const update = (key: keyof EditorData, value: string) => {
@@ -93,6 +109,50 @@ export function TemplateEditor() {
   const save = () => {
     localStorage.setItem('safe-template-project', JSON.stringify(data))
     setSaved(true)
+  }
+
+  const importFile = async (file?: File) => {
+    if (!file) return
+    const extension = file.name.split('.').pop()?.toLowerCase()
+    if (extension === 'ai' || extension === 'pdf') {
+      setImportMessage('AI/PDF нужно сначала экспортировать в SVG или PNG — браузер не сохраняет их редактируемые слои.')
+      return
+    }
+    if (extension === 'json') {
+      try {
+        const parsed = JSON.parse(await file.text()) as Partial<EditorData>
+        const allowed = Object.keys(initialData) as (keyof EditorData)[]
+        const clean = Object.fromEntries(allowed.filter(key => typeof parsed[key] === 'string').map(key => [key, parsed[key]]))
+        setData(current => ({ ...current, ...clean }))
+        setImportMessage(`Проект «${file.name}» загружен`)
+        setSaved(false)
+      } catch { setImportMessage('Не удалось прочитать JSON-проект') }
+      return
+    }
+    if (!['image/svg+xml', 'image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      setImportMessage('Неподдерживаемый формат. Используйте SVG, PNG, JPG, WEBP или JSON.')
+      return
+    }
+    if (file.size > 8 * 1024 * 1024) {
+      setImportMessage('Файл больше 8 МБ. Уменьшите его перед загрузкой.')
+      return
+    }
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(String(reader.result))
+      reader.onerror = () => reject(new Error('Не удалось прочитать файл'))
+      reader.readAsDataURL(file)
+    })
+    setCustomTemplate({ name: file.name, dataUrl })
+    setImportMessage(`Основа «${file.name}» загружена. Поля и SAMPLE добавляются поверх.`)
+  }
+
+  const downloadProject = () => {
+    const link = document.createElement('a')
+    link.download = `${(data.reference || 'demo-project').replace(/[^a-z0-9_-]+/gi, '-')}.json`
+    link.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }))
+    link.click()
+    setTimeout(() => URL.revokeObjectURL(link.href), 0)
   }
 
   const downloadPng = async () => {
@@ -120,6 +180,11 @@ export function TemplateEditor() {
     </div>
     <div className="editor-layout">
       <form className="editor-form" onSubmit={event => event.preventDefault()}>
+        <div className="editor-import">
+          <div><p className="field-label">Свой файл</p><strong>{customTemplate?.name || 'Загрузите шаблон или проект'}</strong><small>{importMessage}</small></div>
+          <label className="primary editor-file-button">Выбрать файл<input type="file" accept=".svg,.png,.jpg,.jpeg,.webp,.json,.ai,.pdf" onChange={event => { void importFile(event.target.files?.[0]).catch(error => setImportMessage(error.message)); event.target.value = '' }}/></label>
+          {customTemplate && <button type="button" className="chip" onClick={() => { setCustomTemplate(null); setImportMessage('Пользовательская основа убрана') }}>Убрать основу</button>}
+        </div>
         <div className="editor-section"><p className="field-label">Проект</p>
           <label>Название студии<input value={data.studio} onChange={e => update('studio', e.target.value)} maxLength={28}/></label>
           <label>Название проекта<input value={data.project} onChange={e => update('project', e.target.value)} maxLength={32}/></label>
@@ -139,6 +204,7 @@ export function TemplateEditor() {
         </div>
         <div className="editor-actions">
           <button type="button" className="primary" onClick={save}>{saved ? 'Сохранено ✓' : 'Сохранить проект'}</button>
+          <button type="button" className="chip" onClick={downloadProject}>Скачать проект</button>
           <button type="button" className="chip" onClick={() => void downloadPng().catch(error => window.alert(error.message))}>Скачать PNG</button>
           <button type="button" className="chip" onClick={() => window.print()}>PDF / Печать</button>
           <button type="button" className="chip" onClick={() => setData(initialData)}>Сбросить</button>

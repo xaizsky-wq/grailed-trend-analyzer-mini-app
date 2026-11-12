@@ -146,3 +146,8 @@ html,body,#root{background-color:#edf4fb;background-image:radial-gradient(circle
   [data-telegram=true] .stats{font-size:.74rem}
   [data-telegram=true] .score{padding-left:0}
 }
+
+.editor-request{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;padding:16px;border:1px solid rgba(255,255,255,.85);border-radius:18px;background:linear-gradient(145deg,rgba(255,255,255,.96),rgba(226,238,248,.98));box-shadow:0 10px 20px rgba(58,85,111,.14)}
+.editor-request-heading{grid-column:1/-1;display:flex;align-items:end;justify-content:space-between;gap:12px}.editor-request-heading>div{display:grid}.editor-request-heading .field-label{margin:0}.editor-request-heading strong{color:#36516a}.editor-request-heading small{color:#687f95;font-size:.7rem;text-align:right}
+.editor-request textarea{width:100%;min-width:0;resize:vertical;padding:11px 12px;border:1px solid #adc2d5;border-radius:12px;background:#f8fbff;color:#354f68;font:inherit;line-height:1.45}.editor-request .primary{align-self:end}
+@media(max-width:560px){.editor-request{grid-template-columns:1fr}.editor-request-heading{align-items:start;flex-direction:column}.editor-request-heading small{text-align:left}.editor-request .primary{width:100%}}

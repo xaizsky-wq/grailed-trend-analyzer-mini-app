@@ -28,6 +28,62 @@ const initialData: EditorData = {
   reference: 'DEMO-2026-001',
 }
 
+const fieldAliases: Record<keyof EditorData, string[]> = {
+  studio: ['studio', 'студия', 'магазин', 'бренд'],
+  project: ['project', 'проект', 'заголовок', 'коллекция'],
+  item: ['item', 'товар', 'вещь', 'название', 'модель'],
+  sku: ['sku', 'артикул', 'код товара'],
+  size: ['size', 'размер'],
+  color: ['color', 'colour', 'цвет'],
+  price: ['price', 'цена', 'стоимость', 'сумма'],
+  currency: ['currency', 'валюта'],
+  tax: ['tax', 'налог', 'ндс', 'vat'],
+  date: ['date', 'дата'],
+  reference: ['reference', 'референс', 'номер', 'заказ'],
+}
+
+function normalizeCurrency(value: string) {
+  const upper = value.trim().toUpperCase()
+  if (/^(€|EUR|ЕВРО)$/.test(upper)) return 'EUR'
+  if (/^(\$|USD|ДОЛЛАР(?:Ы|ОВ)?)$/.test(upper)) return 'USD'
+  if (/^(£|GBP|ФУНТ(?:Ы|ОВ)?)$/.test(upper)) return 'GBP'
+  if (/^(₴|UAH|ГРН|ГРИВ(?:НА|НЫ|ЕН))$/.test(upper)) return 'UAH'
+  return upper
+}
+
+function normalizeDate(value: string) {
+  const clean = value.trim()
+  const match = clean.match(/^(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{4})$/)
+  if (!match) return clean
+  return `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`
+}
+
+export function parseItemRequest(request: string): Partial<EditorData> {
+  const result: Partial<EditorData> = {}
+  const aliases = Object.entries(fieldAliases) as [keyof EditorData, string[]][]
+  for (const rawLine of request.split(/\n|;/)) {
+    const line = rawLine.trim().replace(/^[-•]\s*/, '')
+    const parts = line.match(/^([^:=—–-]+?)\s*(?::|=|—|–|\s-\s)\s*(.+)$/)
+    if (!parts) continue
+    const entry = aliases.find(([, names]) => names.includes(parts[1].trim().toLowerCase()))
+    if (!entry) continue
+    const key = entry[0]
+    const value = parts[2].trim()
+    result[key] = key === 'currency' ? normalizeCurrency(value)
+      : key === 'date' ? normalizeDate(value)
+        : key === 'price' || key === 'tax' ? value.replace(/[^\d.,-]/g, '').replace(',', '.')
+          : value
+  }
+  const price = request.match(/(?:цена|стоимость|сумма)\s*(?:[:=—–-]\s*)?([\d\s]+(?:[.,]\d{1,2})?)\s*(EUR|USD|GBP|UAH|€|\$|£|₴|грн)?/i)
+  if (price) {
+    result.price ??= price[1].replace(/\s/g, '').replace(',', '.')
+    if (price[2]) result.currency ??= normalizeCurrency(price[2])
+  }
+  const size = request.match(/(?:размер|size)\s*(?:[:=—–-]\s*)?([\w./-]{1,12})/i)
+  if (size) result.size ??= size[1]
+  return result
+}
+
 function escapeXml(value: string) {
   return value.replace(/[<>&'\"]/g, char => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' })[char]!)
 }
@@ -98,6 +154,8 @@ export function TemplateEditor() {
   const [saved, setSaved] = useState(false)
   const [customTemplate, setCustomTemplate] = useState<{ name: string; dataUrl: string } | null>(null)
   const [importMessage, setImportMessage] = useState('SVG, PNG, JPG, WEBP или сохранённый проект JSON')
+  const [itemRequest, setItemRequest] = useState('')
+  const [requestMessage, setRequestMessage] = useState('')
   const svg = useMemo(() => makeSvg(data, customTemplate?.dataUrl), [data, customTemplate])
   const previewRef = useRef<HTMLDivElement>(null)
 
@@ -109,6 +167,18 @@ export function TemplateEditor() {
   const save = () => {
     localStorage.setItem('safe-template-project', JSON.stringify(data))
     setSaved(true)
+  }
+
+  const applyItemRequest = () => {
+    const parsed = parseItemRequest(itemRequest)
+    const recognized = Object.keys(parsed).length
+    if (!recognized) {
+      setRequestMessage('Поля не распознаны. Используйте формат «Название: …», «Размер: …», «Цена: …».')
+      return
+    }
+    setData(current => ({ ...current, ...parsed }))
+    setSaved(false)
+    setRequestMessage(`Обновлено полей: ${recognized}`)
   }
 
   const importFile = async (file?: File) => {
@@ -180,6 +250,11 @@ export function TemplateEditor() {
     </div>
     <div className="editor-layout">
       <form className="editor-form" onSubmit={event => event.preventDefault()}>
+        <div className="editor-request">
+          <div className="editor-request-heading"><div><p className="field-label">Запрос пользователя</p><strong>Заполнить документ под вещь</strong></div><small>{requestMessage || 'По одному полю в строке'}</small></div>
+          <textarea value={itemRequest} onChange={event => { setItemRequest(event.target.value); setRequestMessage('') }} placeholder={'Название: Prada Re-Nylon Jacket\nАртикул: SGB685\nРазмер: M\nЦвет: Black\nЦена: 1850 EUR\nДата: 12.11.2026'} rows={7}/>
+          <button type="button" className="primary" onClick={applyItemRequest}>Применить запрос</button>
+        </div>
         <div className="editor-import">
           <div><p className="field-label">Свой файл</p><strong>{customTemplate?.name || 'Загрузите шаблон или проект'}</strong><small>{importMessage}</small></div>
           <label className="primary editor-file-button">Выбрать файл<input type="file" accept=".svg,.png,.jpg,.jpeg,.webp,.json,.ai,.pdf" onChange={event => { void importFile(event.target.files?.[0]).catch(error => setImportMessage(error.message)); event.target.value = '' }}/></label>

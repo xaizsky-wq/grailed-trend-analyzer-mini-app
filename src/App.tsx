@@ -16,14 +16,13 @@ import {
 const PhotoSearch = lazy(() => import('./components/PhotoSearch').then(module => ({ default: module.PhotoSearch })))
 const PhotoUnique = lazy(() => import('./components/PhotoUnique').then(module => ({ default: module.PhotoUnique })))
 const PhotoClean = lazy(() => import('./components/PhotoClean').then(module => ({ default: module.PhotoClean })))
-const TemplateEditor = lazy(() => import('./components/TemplateEditor').then(module => ({ default: module.TemplateEditor })))
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10)
 }
 
 export default function App() {
-  const [view, setView] = useState<'trends' | 'photo' | 'unique' | 'clean' | 'editor'>('trends')
+  const [view, setView] = useState<'trends' | 'photo' | 'unique' | 'clean'>('trends')
   const [categories, setCategories] = useState<Category[]>([])
   const [categoryId, setCategoryId] = useState('sneakers')
   const [periodType, setPeriodType] = useState<PeriodType>('days_30')
@@ -101,10 +100,9 @@ export default function App() {
         <button type="button" className={view === 'photo' ? 'view-tab active' : 'view-tab'} onClick={() => setView('photo')}>Поиск по фото</button>
         <button type="button" className={view === 'unique' ? 'view-tab active' : 'view-tab'} onClick={() => setView('unique')}>Remover</button>
         <button type="button" className={view === 'clean' ? 'view-tab active' : 'view-tab'} onClick={() => setView('clean')}>Очистка следов</button>
-        <button type="button" className={view === 'editor' ? 'view-tab active' : 'view-tab'} onClick={() => setView('editor')}>Редактор</button>
       </nav>
 
-      {view === 'photo' ? <Suspense fallback={<div className="state"><p>Открываем поиск по фото…</p></div>}><PhotoSearch /></Suspense> : view === 'unique' ? <Suspense fallback={<div className="state"><p>Открываем Remover…</p></div>}><PhotoUnique /></Suspense> : view === 'clean' ? <Suspense fallback={<div className="state"><p>Открываем очистку…</p></div>}><PhotoClean /></Suspense> : view === 'editor' ? <Suspense fallback={<div className="state"><p>Открываем редактор…</p></div>}><TemplateEditor /></Suspense> : <>
+      {view === 'photo' ? <Suspense fallback={<div className="state"><p>Открываем поиск по фото…</p></div>}><PhotoSearch /></Suspense> : view === 'unique' ? <Suspense fallback={<div className="state"><p>Открываем Remover…</p></div>}><PhotoUnique /></Suspense> : view === 'clean' ? <Suspense fallback={<div className="state"><p>Открываем очистку…</p></div>}><PhotoClean /></Suspense> : <>
 
       <section className="controls">
         {bootError && <p className="banner">{bootError}</p>}

@@ -9,6 +9,7 @@ const token = process.env.BOT_TOKEN || ''
 const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET || ''
 const publicUrl = (process.env.PUBLIC_URL || (process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : '')).replace(/\/$/, '')
 const dist = join(process.cwd(), 'dist')
+const receiptAssets = join(process.cwd(), 'receipt-assets')
 const APP_ID = 'MNRWEFSS2Q'
 const SEARCH_KEY = 'c89dbaddf15fe70e1941a109bf7c2a3d'
 const PATHS = {
@@ -52,6 +53,25 @@ async function handleUpdate(update) {
 function json(response, status, value) {
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
   response.end(JSON.stringify(value))
+}
+
+async function serveReceipt(response, id, inline) {
+  if (!/^(a4|thermal|email)-\d+$/.test(id)) return json(response, 400, { ok: false, error: 'Invalid receipt id' })
+  const candidates = [`${id}.ai`, `${id}.html`]
+  const name = candidates.find(candidate => existsSync(join(receiptAssets, candidate)))
+  if (!name) return json(response, 404, { ok: false, error: 'Receipt not found' })
+  const file = join(receiptAssets, name)
+  const info = await stat(file)
+  const isHtml = name.endsWith('.html')
+  response.writeHead(200, {
+    'content-type': isHtml ? 'text/html; charset=utf-8' : 'application/pdf',
+    'content-length': info.size,
+    'content-disposition': `${inline ? 'inline' : 'attachment'}; filename="${name}"`,
+    'cache-control': 'private, max-age=300',
+    'x-content-type-options': 'nosniff',
+    ...(isHtml ? { 'content-security-policy': "sandbox; default-src 'none'; img-src https: data:; style-src 'unsafe-inline' https:; font-src https: data:; base-uri 'none'; form-action 'none'" } : {}),
+  })
+  createReadStream(file).pipe(response)
 }
 
 function previewUrl(value, width) {
@@ -235,6 +255,8 @@ const server = createServer(async (request, response) => {
     const url = new URL(request.url, 'http://localhost')
     if (request.url === '/health') return json(response, 200, { ok: true, bot: Boolean(token), web_app: Boolean(publicUrl) })
     if (url.pathname === '/api/trends' && request.method === 'GET') return await trends(url, response)
+    const receiptMatch = url.pathname.match(/^\/api\/receipts\/((?:a4|thermal|email)-\d+)$/)
+    if (receiptMatch && request.method === 'GET') return await serveReceipt(response, receiptMatch[1], url.searchParams.get('mode') === 'inline')
     const galleryMatch = url.pathname.match(/^\/api\/listings\/(\d+)\/gallery\.zip$/)
     if (galleryMatch && request.method === 'GET') return await galleryZip(request, response, galleryMatch[1])
     if (request.url === '/api/telegram/webhook' && request.method === 'POST') {

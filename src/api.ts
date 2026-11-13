@@ -5,8 +5,9 @@ export type TrendItem = { rank: number; model_key: string; title: string; brand:
 export type SoldListing = { id: string; title: string; color: string | null; size: string | null; price: number; seller: string | null; sold_at: string | null; grailed_url: string; image_url?: string | null; photo_count?: number }
 export type ModelItemsResponse = { category_id: string; model_key: string; total_sold: number; returned: number; items: SoldListing[] }
 export type TrendsResponse = { category_id: string; period: { type: string; value: string }; generated_at: string; stale?: boolean; message?: string; analysis?: { sold_sample: number; models_found: number; ranked_by: string; from_cache?: boolean }; items: TrendItem[] }
-export type PhotoListing = { id: string; title: string; brand: string; price: number; status: 'active' | 'sold'; grailed_url: string; image_url: string | null; color: string | null; size: string | null; sold_at: string | null; photo_count?: number }
+export type PhotoListing = { id: string; title: string; brand: string; price: number; status: 'active' | 'sold'; grailed_url: string; image_url: string | null; color: string | null; size: string | null; sold_at: string | null; photo_count?: number; match_score?: number; matched_query?: string }
 export type PhotoSearchResponse = { activeTotal: number; soldTotal: number; active: PhotoListing[]; sold: PhotoListing[]; query: string }
+export type PhotoSearchQuery = { query: string; score: number }
 
 const CATEGORIES: Category[] = [
   { id: 'sneakers', name: 'Кроссовки' }, { id: 'down_jackets', name: 'Пуховики' },
@@ -141,18 +142,41 @@ function toPhotoListing(hit: any, status: 'active' | 'sold'): PhotoListing {
   }
 }
 
-export async function searchPhotoCandidates(textQuery: string): Promise<PhotoSearchResponse> {
-  const normalized = textQuery.trim()
-  const [activeData, soldData] = await Promise.all([
-    listingQuery('active', normalized, 0),
-    listingQuery('sold', normalized, 0),
-  ])
+function queryTokens(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').split(/\s+/).filter(token => token.length > 1 && !['a', 'the', 'of', 'product', 'photo', 'mens', 'men'].includes(token))
+}
+
+function mergePhotoHits(groups: Array<{ hits: any[]; query: PhotoSearchQuery }>, status: 'active' | 'sold') {
+  const merged = new Map<string, PhotoListing>()
+  groups.forEach(group => group.hits.forEach((hit, rank) => {
+    const listing = toPhotoListing(hit, status)
+    if (!listing.id) return
+    const haystack = `${listing.brand} ${listing.title}`.toLowerCase()
+    const tokens = queryTokens(group.query.query)
+    const overlap = tokens.length ? tokens.filter(token => haystack.includes(token)).length / tokens.length : 0
+    const brandToken = tokens[0] && haystack.startsWith(tokens[0]) ? 0.12 : 0
+    const score = Math.min(1, group.query.score * 0.52 + overlap * 0.36 + brandToken + Math.max(0, 0.08 - rank * 0.001))
+    const previous = merged.get(listing.id)
+    if (!previous || score > (previous.match_score || 0)) merged.set(listing.id, { ...listing, match_score: score, matched_query: group.query.query })
+  }))
+  return [...merged.values()].sort((a, b) => (b.match_score || 0) - (a.match_score || 0))
+}
+
+export async function searchPhotoCandidates(input: string | PhotoSearchQuery[]): Promise<PhotoSearchResponse> {
+  const raw = typeof input === 'string' ? [{ query: input, score: 1 }] : input
+  const seen = new Set<string>()
+  const queries = raw.map(item => ({ query: item.query.trim(), score: Math.max(0, Math.min(1, item.score)) })).filter(item => item.query && !seen.has(item.query.toLowerCase()) && seen.add(item.query.toLowerCase())).slice(0, 4)
+  if (!queries.length) return { activeTotal: 0, soldTotal: 0, active: [], sold: [], query: '' }
+  const tasks = queries.flatMap((query, queryIndex) => (['active', 'sold'] as const).flatMap(status => Array.from({ length: queryIndex === 0 ? 3 : 1 }, (_, page) => ({ status, query, page }))))
+  const responses = await Promise.all(tasks.map(async task => ({ ...task, data: await listingQuery(task.status, task.query.query, task.page) })))
+  const activeGroups = responses.filter(item => item.status === 'active').map(item => ({ hits: item.data.hits || [], query: item.query }))
+  const soldGroups = responses.filter(item => item.status === 'sold').map(item => ({ hits: item.data.hits || [], query: item.query }))
   return {
-    activeTotal: activeData.nbHits || 0,
-    soldTotal: soldData.nbHits || 0,
-    active: (activeData.hits || []).map(hit => toPhotoListing(hit, 'active')),
-    sold: (soldData.hits || []).map(hit => toPhotoListing(hit, 'sold')),
-    query: normalized,
+    activeTotal: Math.max(...responses.filter(item => item.status === 'active').map(item => item.data.nbHits || 0), 0),
+    soldTotal: Math.max(...responses.filter(item => item.status === 'sold').map(item => item.data.nbHits || 0), 0),
+    active: mergePhotoHits(activeGroups, 'active'),
+    sold: mergePhotoHits(soldGroups, 'sold'),
+    query: queries.map(item => item.query).join(' · '),
   }
 }
 

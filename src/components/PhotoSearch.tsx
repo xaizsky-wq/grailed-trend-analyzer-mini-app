@@ -41,6 +41,20 @@ const PRODUCTS = [
   'Chrome Hearts jewelry', 'Tiffany & Co. necklace', 'Cartier Love bracelet',
 ]
 
+const BRANDS = [
+  'Nike', 'Jordan', 'Adidas', 'Yeezy', 'New Balance', 'Maison Margiela', 'Rick Owens', 'Balenciaga', 'Common Projects', 'Salomon', 'ASICS', 'Converse', 'Vans',
+  'Prada', 'Bottega Veneta', 'Timberland', 'The North Face', 'Canada Goose', 'Moncler', "Arc'teryx", 'Patagonia', 'Stone Island', 'Supreme', 'Chrome Hearts',
+  'Stussy', 'Bape', 'Off-White', 'Louis Vuitton', 'Goyard', 'Dior', 'Gucci', 'Telfar', 'Essentials', 'Levis', 'Carhartt', 'Dickies', 'Rolex', 'Cartier',
+  'Tiffany & Co.', 'Burberry', 'Celine', 'Givenchy', 'Saint Laurent', 'Hermes', 'Fendi', 'Loewe', 'Jacquemus', 'Amiri', 'Palm Angels', 'Fear of God',
+  'Gallery Dept.', 'Vetements', 'Comme des Garcons', 'Issey Miyake', 'Undercover', 'Kapital', 'Visvim', 'Sacai', 'Jil Sander', 'Raf Simons', 'Helmut Lang', 'Miu Miu',
+]
+
+const PRODUCT_TYPES = [
+  'low top sneakers', 'high top sneakers', 'running shoes', 'boots', 'sandals', 'puffer jacket', 'parka', 'technical shell jacket', 'leather jacket', 'hoodie',
+  'sweatshirt', 'T-shirt', 'button-up shirt', 'sweater', 'jeans', 'cargo pants', 'tailored pants', 'shorts', 'baseball cap', 'trucker hat', 'tote bag',
+  'shoulder bag', 'crossbody bag', 'backpack', 'wallet', 'watch', 'necklace', 'bracelet', 'ring', 'sunglasses',
+]
+
 function money(n: number) { return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n) }
 
 function ListingGrid({ items, empty }: { items: PhotoListing[]; empty: string }) {
@@ -60,7 +74,7 @@ function ListingGrid({ items, empty }: { items: PhotoListing[]; empty: string })
   if (!items.length) return <p className="photo-empty">{empty}</p>
   return <><div className="photo-grid">{items.slice(0, visibleCount).map(item => <article className="photo-card" key={`${item.status}-${item.id}`}>
     <div className="photo-card-image">{item.image_url ? <><a href={item.grailed_url} target="_blank" rel="noreferrer"><SmartImage src={item.image_url} /></a><button type="button" className="image-download gallery-download" aria-label="Скачать все фото объявления" title={`Скачать все фото${item.photo_count ? ` (${item.photo_count})` : ''} в максимальном качестве`} onClick={() => void downloadListingGallery(item.id, item.title).catch(error => window.alert(error instanceof Error ? error.message : 'Не удалось скачать галерею'))}>ZIP</button></> : <div className="photo-placeholder" />}</div>
-    <div className="photo-card-body"><p className="brand">{item.brand || '—'}</p><h4>{item.title}</h4><p className="listing-attributes">{item.size && <span className="size-chip">Размер {item.size}</span>}{item.color && <span className="color-chip">{item.color}</span>}</p><p><strong>{money(item.price)}</strong></p><a className="photo-card-link" href={item.grailed_url} target="_blank" rel="noreferrer">Лот ↗</a></div>
+    <div className="photo-card-body"><p className="brand">{item.brand || '—'}</p><h4>{item.title}</h4><p className="listing-attributes">{item.match_score != null && <span className="match-chip">Совпадение {Math.round(item.match_score * 100)}%</span>}{item.size && <span className="size-chip">Размер {item.size}</span>}{item.color && <span className="color-chip">{item.color}</span>}</p><p><strong>{money(item.price)}</strong></p><a className="photo-card-link" href={item.grailed_url} target="_blank" rel="noreferrer">Лот ↗</a></div>
   </article>)}</div>{visibleCount < items.length && <div className="results-sentinel" ref={loadMoreRef} aria-label={`Показано ${visibleCount} из ${items.length}`}><span>{visibleCount} / {items.length}</span></div>}</>
 }
 
@@ -104,15 +118,23 @@ export function PhotoSearch() {
         if (item.file && classifier) {
           setStatus(`AI анализирует фото ${index + 1} из ${queue.length}: ${item.file.name}`)
           const imageUrl = URL.createObjectURL(item.file)
-          const output = await classifier(imageUrl, labels)
-          URL.revokeObjectURL(imageUrl)
-          const aiMatches = output.slice(0, 5).map(row => ({ query: row.label.replace(/^a product photo of /, ''), score: row.score }))
-          ranked = manualQuery ? [...ranked, ...aiMatches] : aiMatches
+          try {
+            const output = await classifier(imageUrl, labels)
+            setStatus(`Определяем бренд и тип вещи ${index + 1} из ${queue.length}`)
+            const brandOutput = await classifier(imageUrl, BRANDS.map(brand => `a fashion product made by ${brand}`))
+            const typeOutput = await classifier(imageUrl, PRODUCT_TYPES.map(type => `a product photo of ${type}`))
+            const aiMatches = output.slice(0, 5).map(row => ({ query: row.label.replace(/^a product photo of /, ''), score: row.score }))
+            const brand = brandOutput[0]
+            const productType = typeOutput[0]
+            const combined = brand && productType ? [{ query: `${brand.label.replace(/^a fashion product made by /, '')} ${productType.label.replace(/^a product photo of /, '')}`, score: Math.sqrt(brand.score * productType.score) }] : []
+            ranked = [...combined, ...aiMatches].sort((a, b) => b.score - a.score)
+            if (manualQuery) ranked.unshift({ query: manualQuery, score: 1 })
+          } finally { URL.revokeObjectURL(imageUrl) }
         }
         const query = ranked[0]?.query
         if (!query) continue
-        setStatus(`Ищем лоты для фото ${index + 1} из ${queue.length}: ${query}`)
-        const found = await searchPhotoCandidates(query)
+        setStatus(`Сверяем активные и проданные лоты для фото ${index + 1} из ${queue.length}`)
+        const found = await searchPhotoCandidates(ranked.slice(0, 4))
         batch.push({ id: `${item.file?.name || 'text'}-${index}`, name: item.file?.name || manualQuery, preview: item.preview, matches: ranked.slice(0, 5), active: found.active, sold: found.sold, totals: { active: found.activeTotal, sold: found.soldTotal } })
       }
       if (!batch.length) throw new Error('AI не смог определить товары')

@@ -74,6 +74,21 @@ async function serveReceipt(response, id, inline) {
   createReadStream(file).pipe(response)
 }
 
+async function imageProxy(requestUrl, response) {
+  let source
+  try { source = new URL(requestUrl.searchParams.get('url') || '') } catch { return json(response, 400, { ok: false, error: 'Invalid image URL' }) }
+  if (source.protocol !== 'https:' || !(source.hostname === 'grailed.com' || source.hostname.endsWith('.grailed.com'))) return json(response, 403, { ok: false, error: 'Image host is not allowed' })
+  const upstream = await fetchWithTimeout(source.toString(), 15_000)
+  const type = upstream.headers.get('content-type') || ''
+  if (!upstream.ok || !type.startsWith('image/')) return json(response, 502, { ok: false, error: 'Image unavailable' })
+  const declaredSize = Number(upstream.headers.get('content-length') || 0)
+  if (declaredSize > 12 * 1024 * 1024) return json(response, 413, { ok: false, error: 'Image is too large' })
+  const bytes = Buffer.from(await upstream.arrayBuffer())
+  if (bytes.length > 12 * 1024 * 1024) return json(response, 413, { ok: false, error: 'Image is too large' })
+  response.writeHead(200, { 'content-type': type, 'content-length': bytes.length, 'cache-control': 'public, max-age=86400', 'access-control-allow-origin': '*', 'x-content-type-options': 'nosniff' })
+  response.end(bytes)
+}
+
 function previewUrl(value, width) {
   if (!value) return null
   try { const url = new URL(String(value)); url.searchParams.set('w', String(width)); return url.toString() } catch { return String(value) }
@@ -255,6 +270,7 @@ const server = createServer(async (request, response) => {
     const url = new URL(request.url, 'http://localhost')
     if (request.url === '/health') return json(response, 200, { ok: true, bot: Boolean(token), web_app: Boolean(publicUrl) })
     if (url.pathname === '/api/trends' && request.method === 'GET') return await trends(url, response)
+    if (url.pathname === '/api/image-proxy' && request.method === 'GET') return await imageProxy(url, response)
     const receiptMatch = url.pathname.match(/^\/api\/receipts\/((?:a4|thermal|email)-\d+)$/)
     if (receiptMatch && request.method === 'GET') return await serveReceipt(response, receiptMatch[1], url.searchParams.get('mode') === 'inline')
     const galleryMatch = url.pathname.match(/^\/api\/listings\/(\d+)\/gallery\.zip$/)

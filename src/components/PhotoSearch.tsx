@@ -6,6 +6,8 @@ import { SmartImage } from './SmartImage'
 type Match = { query: string; score: number }
 type ClassifierResult = { label: string; score: number }
 type ImageClassifier = ((image: string, labels: string[]) => Promise<ClassifierResult[]>) & { dispose?: () => void | Promise<void> }
+type FeatureTensor = { data: Float32Array | number[]; dims: number[] }
+type ImageFeatureExtractor = ((images: string | string[]) => Promise<FeatureTensor>) & { dispose?: () => void | Promise<void> }
 
 async function makeThumbnail(file: File) {
   const url = URL.createObjectURL(file)
@@ -57,6 +59,40 @@ const PRODUCT_TYPES = [
 
 function money(n: number) { return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(n) }
 
+function cosine(a: ArrayLike<number>, b: ArrayLike<number>) {
+  let dot = 0, aa = 0, bb = 0
+  const length = Math.min(a.length, b.length)
+  for (let index = 0; index < length; index++) { dot += a[index] * b[index]; aa += a[index] * a[index]; bb += b[index] * b[index] }
+  return aa && bb ? dot / Math.sqrt(aa * bb) : 0
+}
+
+async function visualRerank(extractor: ImageFeatureExtractor, file: File, items: PhotoListing[]) {
+  const candidates = items.filter(item => item.image_url).slice(0, 36)
+  if (!candidates.length) return items
+  const sourceUrl = URL.createObjectURL(file)
+  try {
+    const source = await extractor(sourceUrl)
+    const sourceVector = source.data
+    const visualScores = new Map<string, number>()
+    for (let start = 0; start < candidates.length; start += 6) {
+      const group = candidates.slice(start, start + 6)
+      const urls = group.map(item => `/api/image-proxy?url=${encodeURIComponent(item.image_url!)}`)
+      try {
+        const output = await extractor(urls)
+        const width = output.dims.at(-1) || 512
+        group.forEach((item, index) => {
+          const vector = output.data.slice(index * width, (index + 1) * width)
+          visualScores.set(item.id, Math.max(0, Math.min(1, cosine(sourceVector, vector))))
+        })
+      } catch { /* skip a batch when a remote image is unavailable */ }
+    }
+    return items.map(item => {
+      const visual = visualScores.get(item.id)
+      return visual == null ? item : { ...item, visual_score: visual, match_score: Math.min(1, visual * .72 + (item.match_score || 0) * .28) }
+    }).sort((a, b) => (b.match_score || 0) - (a.match_score || 0))
+  } finally { URL.revokeObjectURL(sourceUrl) }
+}
+
 function ListingGrid({ items, empty }: { items: PhotoListing[]; empty: string }) {
   const [visibleCount, setVisibleCount] = useState(18)
   const loadMoreRef = useRef<HTMLDivElement | null>(null)
@@ -97,6 +133,7 @@ export function PhotoSearch() {
     if (!files.length && !manualQuery) { setError('Загрузите фото или введите название товара.'); return }
     setLoading(true); setError(null); setResults([]); setSelectedResult(0)
     let classifier: ImageClassifier | null = null
+    let extractor: ImageFeatureExtractor | null = null
     try {
       const labels = PRODUCTS.map(product => `a product photo of ${product}`)
       if (files.length) {
@@ -111,7 +148,7 @@ export function PhotoSearch() {
         }) as unknown as ImageClassifier
       }
       const queue: Array<{ file: File | null; preview: string | null }> = files.length ? files.map((file, index) => ({ file, preview: previews[index] || null })) : [{ file: null, preview: null }]
-      const batch: BatchResult[] = []
+      const plans: Array<{ file: File | null; preview: string | null; ranked: Match[]; index: number }> = []
       for (let index = 0; index < queue.length; index++) {
         const item = queue[index]
         let ranked: Match[] = manualQuery ? [{ query: manualQuery, score: 1 }] : []
@@ -131,17 +168,33 @@ export function PhotoSearch() {
             if (manualQuery) ranked.unshift({ query: manualQuery, score: 1 })
           } finally { URL.revokeObjectURL(imageUrl) }
         }
-        const query = ranked[0]?.query
-        if (!query) continue
-        setStatus(`Сверяем активные и проданные лоты для фото ${index + 1} из ${queue.length}`)
-        const found = await searchPhotoCandidates(ranked.slice(0, 4))
-        batch.push({ id: `${item.file?.name || 'text'}-${index}`, name: item.file?.name || manualQuery, preview: item.preview, matches: ranked.slice(0, 5), active: found.active, sold: found.sold, totals: { active: found.activeTotal, sold: found.soldTotal } })
+        if (ranked[0]?.query) plans.push({ ...item, ranked, index })
+      }
+      try { await classifier?.dispose?.() } catch { /* best-effort */ }
+      classifier = null
+      if (plans.some(plan => plan.file)) {
+        setStatus('Загружаем модуль визуального сравнения…')
+        const { pipeline } = await import('@huggingface/transformers')
+        extractor = await pipeline('image-feature-extraction', 'Xenova/clip-vit-base-patch32') as unknown as ImageFeatureExtractor
+      }
+      const batch: BatchResult[] = []
+      for (const plan of plans) {
+        setStatus(`Ищем активные и проданные лоты ${plan.index + 1} из ${queue.length}`)
+        const found = await searchPhotoCandidates(plan.ranked.slice(0, 4))
+        let active = found.active, sold = found.sold
+        if (plan.file && extractor) {
+          setStatus(`Сравниваем фото с лотами Grailed ${plan.index + 1} из ${queue.length}`)
+          active = await visualRerank(extractor, plan.file, active)
+          sold = await visualRerank(extractor, plan.file, sold)
+        }
+        batch.push({ id: `${plan.file?.name || 'text'}-${plan.index}`, name: plan.file?.name || manualQuery, preview: plan.preview, matches: plan.ranked.slice(0, 5), active, sold, totals: { active: found.activeTotal, sold: found.soldTotal } })
       }
       if (!batch.length) throw new Error('AI не смог определить товары')
       setResults(batch)
       requestAnimationFrame(() => resultsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
     } catch (err) { setError(err instanceof Error ? err.message : 'Не удалось запустить локальную AI-модель') } finally {
       try { await classifier?.dispose?.() } catch { /* model cleanup is best-effort */ }
+      try { await extractor?.dispose?.() } catch { /* model cleanup is best-effort */ }
       setLoading(false); setStatus('')
     }
   }

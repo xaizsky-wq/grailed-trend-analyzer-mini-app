@@ -5,7 +5,7 @@ export type TrendItem = { rank: number; model_key: string; title: string; brand:
 export type SoldListing = { id: string; title: string; color: string | null; size: string | null; price: number; seller: string | null; sold_at: string | null; grailed_url: string; image_url?: string | null; photo_count?: number }
 export type ModelItemsResponse = { category_id: string; model_key: string; total_sold: number; returned: number; items: SoldListing[] }
 export type TrendsResponse = { category_id: string; period: { type: string; value: string }; generated_at: string; stale?: boolean; message?: string; analysis?: { sold_sample: number; models_found: number; ranked_by: string; from_cache?: boolean }; items: TrendItem[] }
-export type PhotoListing = { id: string; title: string; brand: string; price: number; status: 'active' | 'sold'; grailed_url: string; image_url: string | null; color: string | null; size: string | null; sold_at: string | null; photo_count?: number; match_score?: number; matched_query?: string }
+export type PhotoListing = { id: string; title: string; brand: string; price: number; status: 'active' | 'sold'; grailed_url: string; image_url: string | null; color: string | null; size: string | null; sold_at: string | null; photo_count?: number; match_score?: number; visual_score?: number; matched_query?: string }
 export type PhotoSearchResponse = { activeTotal: number; soldTotal: number; active: PhotoListing[]; sold: PhotoListing[]; query: string }
 export type PhotoSearchQuery = { query: string; score: number }
 

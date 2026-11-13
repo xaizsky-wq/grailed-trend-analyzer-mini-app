@@ -70,24 +70,18 @@ function contentAwareFill(ctx: CanvasRenderingContext2D, x: number, y: number, w
   const pixels: Array<{ x: number; y: number; layer: number }> = []
   for (let py = y; py < y + h; py++) for (let px = x; px < x + w; px++) if (targetMask[py * width + px]) pixels.push({ x: px, y: py, layer: Math.min(px - x, x + w - 1 - px, py - y, y + h - 1 - py) })
   pixels.sort((a, b) => a.layer - b.layer || ((a.x * 73856093 ^ a.y * 19349663) - (b.x * 73856093 ^ b.y * 19349663)))
-  const span = Math.max(12, Math.min(72, Math.round(Math.max(w, h) * .35)))
-  const offsets = Array.from({ length: 11 }, (_, index) => Math.round((index - 5) * span / 5))
-  const neighbors: Array<[number, number]> = []
-  for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) if (dx || dy) neighbors.push([dx, dy])
+  const offsets = [-18, -10, -5, 0, 5, 10, 18]
+  const neighbors = [[-1,0],[1,0],[0,-1],[0,1],[-1,-1],[1,-1],[-1,1],[1,1]]
   const clampX = (value: number) => Math.max(0, Math.min(width - 1, value))
   const clampY = (value: number) => Math.max(0, Math.min(height - 1, value))
 
   for (const pixel of pixels) {
     const candidates: Array<[number, number]> = []
-    const leftDepth = pixel.x - x, rightDepth = x + w - 1 - pixel.x, topDepth = pixel.y - y, bottomDepth = y + h - 1 - pixel.y
-    candidates.push([clampX(x - 1 - leftDepth), pixel.y], [clampX(x + w + rightDepth), pixel.y], [pixel.x, clampY(y - 1 - topDepth)], [pixel.x, clampY(y + h + bottomDepth)])
     for (const shift of offsets) {
-      for (const distance of [2, 8, 18]) {
-        candidates.push([clampX(x - distance), clampY(pixel.y + shift)])
-        candidates.push([clampX(x + w - 1 + distance), clampY(pixel.y + shift)])
-        candidates.push([clampX(pixel.x + shift), clampY(y - distance)])
-        candidates.push([clampX(pixel.x + shift), clampY(y + h - 1 + distance)])
-      }
+      candidates.push([clampX(x - 1 - pixel.layer), clampY(pixel.y + shift)])
+      candidates.push([clampX(x + w + pixel.layer), clampY(pixel.y + shift)])
+      candidates.push([clampX(pixel.x + shift), clampY(y - 1 - pixel.layer)])
+      candidates.push([clampX(pixel.x + shift), clampY(y + h + pixel.layer)])
     }
     let best = candidates[0], bestScore = Number.POSITIVE_INFINITY
     for (const candidate of candidates) {
@@ -98,29 +92,12 @@ function contentAwareFill(ctx: CanvasRenderingContext2D, x: number, y: number, w
         if (tx < 0 || tx >= width || ty < 0 || ty >= height || !known[ty * width + tx]) continue
         const sx = clampX(candidate[0] + dx), sy = clampY(candidate[1] + dy)
         const ti = (ty * width + tx) * 4, si = (sy * width + sx) * 4
-        const colorDistance = Math.abs(dst[ti] - src[si]) + Math.abs(dst[ti + 1] - src[si + 1]) + Math.abs(dst[ti + 2] - src[si + 2])
-        const weight = dx === 0 || dy === 0 ? 1.25 : 1
-        score += colorDistance * weight; compared += weight
+        score += Math.abs(dst[ti] - src[si]) + Math.abs(dst[ti + 1] - src[si + 1]) + Math.abs(dst[ti + 2] - src[si + 2]); compared++
       }
-      const distancePenalty = Math.hypot(candidate[0] - pixel.x, candidate[1] - pixel.y) * .04
-      if (compared && score / compared + distancePenalty < bestScore) { bestScore = score / compared + distancePenalty; best = candidate }
+      if (compared && score / compared < bestScore) { bestScore = score / compared; best = candidate }
     }
     const target = (pixel.y * width + pixel.x) * 4, chosen = (best[1] * width + best[0]) * 4
-    const targetMean = [0, 0, 0], sourceMean = [0, 0, 0]
-    let meanCount = 0
-    for (const [dx, dy] of neighbors) {
-      const tx = pixel.x + dx, ty = pixel.y + dy
-      if (tx < 0 || tx >= width || ty < 0 || ty >= height || !known[ty * width + tx]) continue
-      const sx = clampX(best[0] + dx), sy = clampY(best[1] + dy)
-      const ti = (ty * width + tx) * 4, si = (sy * width + sx) * 4
-      for (let channel = 0; channel < 3; channel++) { targetMean[channel] += dst[ti + channel]; sourceMean[channel] += src[si + channel] }
-      meanCount++
-    }
-    for (let channel = 0; channel < 3; channel++) {
-      const correction = meanCount ? Math.max(-28, Math.min(28, (targetMean[channel] - sourceMean[channel]) / meanCount)) : 0
-      dst[target + channel] = Math.max(0, Math.min(255, src[chosen + channel] + correction))
-    }
-    dst[target + 3] = 255
+    dst[target] = src[chosen]; dst[target + 1] = src[chosen + 1]; dst[target + 2] = src[chosen + 2]; dst[target + 3] = 255
     known[pixel.y * width + pixel.x] = 1
   }
 

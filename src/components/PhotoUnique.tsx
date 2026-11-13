@@ -3,10 +3,11 @@ import { useEffect, useRef, useState, type PointerEvent } from 'react'
 type Area = { x: number; y: number; w: number; h: number }
 type Point = { x: number; y: number }
 type Sensitivity = 'precise' | 'balanced' | 'weak'
+type FillDirection = 'auto' | 'above' | 'below' | 'left' | 'right'
 type WorkItem = { id: string; file: File; area: Area; result: string | null }
 const emptyArea: Area = { x: 0, y: 0, w: 0, h: 0 }
 
-function contentAwareFill(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, smartMask: boolean, sensitivity: Sensitivity) {
+function contentAwareFill(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, smartMask: boolean, sensitivity: Sensitivity, direction: FillDirection) {
   const canvas = ctx.canvas
   const source = ctx.getImageData(0, 0, canvas.width, canvas.height)
   const output = new ImageData(new Uint8ClampedArray(source.data), source.width, source.height)
@@ -66,7 +67,7 @@ function contentAwareFill(ctx: CanvasRenderingContext2D, x: number, y: number, w
   const known = new Uint8Array(width * height); known.fill(1)
   let maskedPixels = 0
   for (let py = y; py < y + h; py++) for (let px = x; px < x + w; px++) if (targetMask[py * width + px]) { known[py * width + px] = 0; maskedPixels++ }
-  if (smartMask && maskedPixels < Math.max(12, w * h * .002)) throw new Error('В выделении не найден водяной знак. Обведите его плотнее или включите ручное удаление всей области.')
+  if (smartMask && maskedPixels < Math.max(12, w * h * .002)) throw new Error('В выделении не найден контрастный объект. Обведите его плотнее или включите удаление всей области.')
   const pixels: Array<{ x: number; y: number; layer: number }> = []
   for (let py = y; py < y + h; py++) for (let px = x; px < x + w; px++) if (targetMask[py * width + px]) pixels.push({ x: px, y: py, layer: Math.min(px - x, x + w - 1 - px, py - y, y + h - 1 - py) })
   pixels.sort((a, b) => a.layer - b.layer || ((a.x * 73856093 ^ a.y * 19349663) - (b.x * 73856093 ^ b.y * 19349663)))
@@ -78,10 +79,10 @@ function contentAwareFill(ctx: CanvasRenderingContext2D, x: number, y: number, w
   for (const pixel of pixels) {
     const candidates: Array<[number, number]> = []
     for (const shift of offsets) {
-      candidates.push([clampX(x - 1 - pixel.layer), clampY(pixel.y + shift)])
-      candidates.push([clampX(x + w + pixel.layer), clampY(pixel.y + shift)])
-      candidates.push([clampX(pixel.x + shift), clampY(y - 1 - pixel.layer)])
-      candidates.push([clampX(pixel.x + shift), clampY(y + h + pixel.layer)])
+      if (direction === 'auto' || direction === 'left') candidates.push([clampX(x - 1 - pixel.layer), clampY(pixel.y + shift)])
+      if (direction === 'auto' || direction === 'right') candidates.push([clampX(x + w + pixel.layer), clampY(pixel.y + shift)])
+      if (direction === 'auto' || direction === 'above') candidates.push([clampX(pixel.x + shift), clampY(y - 1 - pixel.layer)])
+      if (direction === 'auto' || direction === 'below') candidates.push([clampX(pixel.x + shift), clampY(y + h + pixel.layer)])
     }
     let best = candidates[0], bestScore = Number.POSITIVE_INFINITY
     for (const candidate of candidates) {
@@ -126,6 +127,7 @@ export function PhotoUnique() {
   const [message, setMessage] = useState('')
   const [smartMask, setSmartMask] = useState(true)
   const [sensitivity, setSensitivity] = useState<Sensitivity>('balanced')
+  const [fillDirection, setFillDirection] = useState<FillDirection>('auto')
   const [dragStart, setDragStart] = useState<Point | null>(null)
   const imageRef = useRef<HTMLImageElement>(null)
   const active = items[activeIndex]
@@ -159,7 +161,7 @@ export function PhotoUnique() {
       if (!current.length) setActiveIndex(0)
       return next
     })
-    setMessage('Выберите фото в очереди и обведите водяной знак.')
+    setMessage('Выберите фото в очереди и обведите объект.')
   }
 
   function removeItem(index: number) {
@@ -195,7 +197,7 @@ export function PhotoUnique() {
   function endSelection() {
     if (!dragStart) return
     setDragStart(null)
-    setMessage(area.w > 2 && area.h > 2 ? 'Область выбрана. Рамку можно нарисовать заново.' : 'Нарисуйте рамку вокруг водяного знака.')
+    setMessage(area.w > 2 && area.h > 2 ? 'Область выбрана. Рамку можно нарисовать заново.' : 'Нарисуйте рамку вокруг объекта.')
   }
 
   function autoDetect() {
@@ -234,9 +236,9 @@ export function PhotoUnique() {
       canvas.width = Math.max(1, Math.round(image.width * scale)); canvas.height = Math.max(1, Math.round(image.height * scale))
       const ctx = canvas.getContext('2d')!; ctx.drawImage(image, 0, 0, canvas.width, canvas.height)
       const x = Math.round(area.x * scale), y = Math.round(area.y * scale), w = Math.min(canvas.width - x, Math.round(area.w * scale)), h = Math.min(canvas.height - y, Math.round(area.h * scale))
-      const changed = contentAwareFill(ctx, x, y, w, h, smartMask, sensitivity)
+      const changed = contentAwareFill(ctx, x, y, w, h, smartMask, sensitivity, fillDirection)
       const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', .92)); if (!blob) throw new Error('Не удалось подготовить файл')
-      if (result) URL.revokeObjectURL(result); setResult(URL.createObjectURL(blob)); setMessage(smartMask ? `Готово: распознано и восстановлено ${changed.toLocaleString('ru-RU')} пикселей водяного знака. Детали фото сохранены.` : 'Готово: вся выделенная область восстановлена, EXIF-метаданные очищены.')
+      if (result) URL.revokeObjectURL(result); setResult(URL.createObjectURL(blob)); setMessage(smartMask ? `Готово: распознано и восстановлено ${changed.toLocaleString('ru-RU')} пикселей объекта. Детали фото сохранены.` : 'Готово: вся выделенная область восстановлена, EXIF-метаданные очищены.')
     } catch (error) { setMessage(error instanceof Error ? error.message : 'Не удалось обработать фото') } finally { setBusy(false) }
   }
 
@@ -244,28 +246,31 @@ export function PhotoUnique() {
   const style = image && area.w > 0 ? { left: `${area.x / image.naturalWidth * 100}%`, top: `${area.y / image.naturalHeight * 100}%`, width: `${area.w / image.naturalWidth * 100}%`, height: `${area.h / image.naturalHeight * 100}%` } : undefined
 
   return <section className="photo-search unique-tool">
-    <div className="photo-heading"><div><p className="eyebrow">REMOVER · BATCH · LOCAL</p><h2>Remover</h2></div><p>Загрузите до 10 изображений, по очереди обведите водяной знак на каждом и скачайте очищенные копии. Фото остаются в браузере.</p></div>
+    <div className="photo-heading"><div><p className="eyebrow">OBJECT REMOVER · BATCH · LOCAL</p><h2>Удаление объектов</h2></div><p>Загрузите до 10 изображений, обведите ненужный объект и восстановите область по соседней текстуре. Фото остаются в браузере.</p></div>
     {!preview ? <label className="dropzone remover-upload"><span className="drop-icon">＋</span><strong>Выбрать несколько фото</strong><small>До 10 файлов · JPG, PNG или WEBP</small><input multiple type="file" accept="image/jpeg,image/png,image/webp" onChange={e => { addFiles(e.target.files); e.target.value = '' }} /></label> : <>
       <div className="upload-queue remover-queue">{items.map((item, index) => <div className={index === activeIndex ? 'upload-item active' : 'upload-item'} key={item.id}>
-        <button className="remover-queue-select" type="button" onClick={() => { setActiveIndex(index); setMessage(item.result ? 'Фото обработано. Можно скачать результат или нарисовать рамку заново.' : 'Обведите водяной знак мышью или попробуйте автоопределение.') }}><span>{index + 1}</span><strong>{item.file.name}</strong>{item.result && <small>Готово</small>}</button>
+        <button className="remover-queue-select" type="button" onClick={() => { setActiveIndex(index); setMessage(item.result ? 'Фото обработано. Можно скачать результат или нарисовать рамку заново.' : 'Обведите объект мышью или попробуйте автоопределение.') }}><span>{index + 1}</span><strong>{item.file.name}</strong>{item.result && <small>Готово</small>}</button>
         <button type="button" aria-label={`Удалить ${item.file.name}`} onClick={() => removeItem(index)}>×</button>
       </div>)}</div>
       <div className="remover-workspace" onPointerDown={beginSelection} onPointerMove={moveSelection} onPointerUp={endSelection} onPointerCancel={endSelection}>
-        <img ref={imageRef} src={preview} alt="Фото для обработки" draggable={false} onLoad={() => setMessage('Обведите водяной знак мышью или попробуйте автоопределение.')} />
+        <img ref={imageRef} src={preview} alt="Фото для обработки" draggable={false} onLoad={() => setMessage('Обведите объект мышью или попробуйте автоопределение.')} />
         {style && <div className="remover-selection" style={style}><span>{area.w} × {area.h}</span></div>}
       </div>
       <div className="remover-actions">
         <label className="chip replace-photo">Добавить фото<input multiple type="file" accept="image/jpeg,image/png,image/webp" onChange={e => { addFiles(e.target.files); e.target.value = '' }} /></label>
         <button className="chip" type="button" onClick={autoDetect}>Найти автоматически</button>
-        <button className="chip" type="button" onClick={() => { setArea(emptyArea); setResult(null); setMessage('Обведите водяной знак мышью.') }}>Сбросить рамку</button>
+        <button className="chip" type="button" onClick={() => { setArea(emptyArea); setResult(null); setMessage('Обведите объект мышью.') }}>Сбросить рамку</button>
         <button className="primary" type="button" onClick={() => void process()} disabled={busy || area.w < 3 || area.h < 3}>{busy ? 'Обработка…' : 'Удалить с заполнением'}</button>
       </div>
-      <label className="smart-mask-toggle"><input type="checkbox" checked={smartMask} onChange={event => setSmartMask(event.target.checked)} /><span><strong>Распознавать только водяной знак</strong><small>Сохраняет пиксели фотографии внутри рамки. Отключите только если знак не распознаётся.</small></span></label>
+      <div className="mask-sensitivity"><span className="field-label">Источник текстуры</span><div className="picker">
+        {([['auto','Авто'],['above','Сверху'],['below','Снизу'],['left','Слева'],['right','Справа']] as const).map(([value, label]) => <button type="button" key={value} className={fillDirection === value ? 'chip active' : 'chip'} onClick={() => setFillDirection(value)}>{label}</button>)}
+      </div><small>Для длинной горизонтальной области сначала попробуйте «Сверху» или «Снизу». Для вертикальной — «Слева» или «Справа».</small></div>
+      <label className="smart-mask-toggle"><input type="checkbox" checked={smartMask} onChange={event => setSmartMask(event.target.checked)} /><span><strong>Удалять только контрастный объект</strong><small>Сохраняет остальные пиксели внутри рамки. Отключите, чтобы восстановить всю выделенную область.</small></span></label>
       {smartMask && <div className="mask-sensitivity"><span className="field-label">Чувствительность распознавания</span><div className="picker">
         <button type="button" className={sensitivity === 'precise' ? 'chip active' : 'chip'} onClick={() => setSensitivity('precise')}>Точный</button>
         <button type="button" className={sensitivity === 'balanced' ? 'chip active' : 'chip'} onClick={() => setSensitivity('balanced')}>Баланс</button>
         <button type="button" className={sensitivity === 'weak' ? 'chip active' : 'chip'} onClick={() => setSensitivity('weak')}>Цветной / слабый</button>
-      </div><small>Если знак остался, выберите «Цветной / слабый». Если задевает одежду — «Точный».</small></div>}
+      </div><small>Если часть объекта осталась, выберите «Цветной / слабый». Если задевает фон — «Точный».</small></div>}
       {message && <p className="search-status" role="status">{busy && <span />}{message}</p>}
       {result && <div className="remover-result"><img src={result} alt="Обработанный результат" /><a className="primary download-link" href={result} download={`grailed-clean-${Date.now()}.jpg`}>Скачать очищенное фото</a></div>}
     </>}
